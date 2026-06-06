@@ -1,0 +1,44 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_DATABASE_URL")
+}
+
+model Student {
+  id            String      @id @default(cuid())
+  name          String
+  email         String      @unique
+  department    String
+  faceImage     String?     @db.Text
+  registeredAt  DateTime    @default(now())
+  attendance    Attendance[]
+}
+
+model Attendance {
+  id         String   @id @default(cuid())
+  studentId  String
+  student    Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  confidence Float?
+  timestamp  DateTime @default(now())
+  method     String   @default("manual")
+}
+
+model QuizSession {
+  id            String   @id @default(cuid())
+  studentName   String
+  studentEmail  String?
+  score         Int
+  total         Int
+  category      String?
+  completedAt   DateTime @default(now())
+}
+
+model AppSetting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String  @db.Text
+}
