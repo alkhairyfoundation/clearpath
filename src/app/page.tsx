@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bot, Camera, Gamepad2, Shield, Home, GraduationCap, Sparkles, ChevronRight, Menu, X } from 'lucide-react';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import AssistantTab from '@/components/ceh/AssistantTab';
 import AttendanceTab from '@/components/ceh/AttendanceTab';
 import QuizTab from '@/components/ceh/QuizTab';
@@ -150,10 +151,10 @@ export default function CEHApp() {
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6">
         <AnimatePresence mode="wait">
           {activeTab === 'home' && <HomeTab key="home" onNavigate={setActiveTab} studentCount={students.length} />}
-          {activeTab === 'assistant' && <motion.div key="assistant" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}><AssistantTab avatarUrl={avatarUrl} /></motion.div>}
-          {activeTab === 'attendance' && <motion.div key="attendance" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}><AttendanceTab students={students} onRefreshStudents={fetchStudents} /></motion.div>}
-          {activeTab === 'quiz' && <motion.div key="quiz" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}><QuizTab /></motion.div>}
-          {activeTab === 'admin' && <motion.div key="admin" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}><AdminTab onStudentChange={handleStudentChange} /></motion.div>}
+          {activeTab === 'assistant' && <motion.div key="assistant" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}><ErrorBoundary><AssistantTab avatarUrl={avatarUrl} /></ErrorBoundary></motion.div>}
+          {activeTab === 'attendance' && <motion.div key="attendance" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}><ErrorBoundary><AttendanceTab students={students} onRefreshStudents={fetchStudents} /></ErrorBoundary></motion.div>}
+          {activeTab === 'quiz' && <motion.div key="quiz" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}><ErrorBoundary><QuizTab /></ErrorBoundary></motion.div>}
+          {activeTab === 'admin' && <motion.div key="admin" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}><ErrorBoundary><AdminTab onStudentChange={handleStudentChange} /></ErrorBoundary></motion.div>}
         </AnimatePresence>
       </main>
 

@@ -6,8 +6,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-geist-sans, 'Geist Fallback', system-ui, Arial, Helvetica, sans-serif);
+  --font-mono: var(--font-geist-mono, 'Geist Mono Fallback', ui-monospace, SFMono-Regular, Consolas, monospace);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -41,6 +41,25 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* Font fallbacks in case custom fonts fail to load */
+@font-face {
+  font-family: 'Geist Fallback';
+  src: local('system-ui'), local('Arial');
+  size-adjust: 95%;
+  ascent-override: 90%;
+  descent-override: 20%;
+  line-gap-override: 10%;
+}
+
+@font-face {
+  font-family: 'Geist Mono Fallback';
+  src: local('Consolas'), local('monospace');
+  size-adjust: 95%;
+  ascent-override: 90%;
+  descent-override: 20%;
+  line-gap-override: 10%;
 }
 
 :root {
