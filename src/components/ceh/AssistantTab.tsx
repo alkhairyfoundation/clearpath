@@ -39,6 +39,7 @@ export default function AssistantTab({ avatarUrl }: AssistantTabProps) {
   const [speechSupported, setSpeechSupported] = useState(false);
   const [recognitionSupported, setRecognitionSupported] = useState(false);
   const [schoolContext, setSchoolContext] = useState<SchoolContext | null>(null);
+  const [hasInteracted, setHasInteracted] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -50,6 +51,7 @@ export default function AssistantTab({ avatarUrl }: AssistantTabProps) {
   const autoListenRef = useRef(autoListen);
   const schoolContextRef = useRef(schoolContext);
   const ttsEnabledRef = useRef(ttsEnabled);
+  const voicesLoadedRef = useRef(false);
 
   const speechSupportedRef = useRef(false);
   const recognitionSupportedRef = useRef(false);
@@ -73,16 +75,16 @@ export default function AssistantTab({ avatarUrl }: AssistantTabProps) {
           fetch('/api/leaderboard'),
         ]);
         const [students, attendance, settings, leaderboard] = await Promise.all([
-          studentsRes.json(),
-          attendanceRes.json(),
-          settingsRes.json(),
-          leaderboardRes.json(),
+          studentsRes.ok ? studentsRes.json() : [],
+          attendanceRes.ok ? attendanceRes.json() : [],
+          settingsRes.ok ? settingsRes.json() : {},
+          leaderboardRes.ok ? leaderboardRes.json() : [],
         ]);
         setSchoolContext({
-          students,
-          settings,
+          students: Array.isArray(students) ? students : [],
+          settings: (settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {}) as Record<string, string>,
           attendanceCount: Array.isArray(attendance) ? attendance.length : 0,
-          leaderboard,
+          leaderboard: Array.isArray(leaderboard) ? leaderboard : [],
         });
       } catch { /* silent */ }
     };
@@ -254,6 +256,16 @@ export default function AssistantTab({ avatarUrl }: AssistantTabProps) {
   useEffect(() => {
     stopListeningRef.current = stopListening;
   }, [stopListening]);
+
+  // Speak welcome message on mount
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (ttsEnabledRef.current && synthRef.current) {
+        speak(welcomeMessage.content);
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     if (chatEndRef.current) {

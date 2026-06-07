@@ -34,14 +34,16 @@ export default function CEHApp() {
   const fetchStudents = useCallback(async () => {
     try {
       const res = await fetch('/api/students');
+      if (!res.ok) return;
       const data = await res.json();
-      setStudents(data);
+      if (Array.isArray(data)) setStudents(data);
     } catch { /* silent */ }
   }, []);
 
   const fetchSettings = useCallback(async () => {
     try {
       const res = await fetch('/api/settings');
+      if (!res.ok) return;
       const data = await res.json();
       if (data.avatarUrl) setAvatarUrl(data.avatarUrl);
     } catch { /* silent */ }
@@ -57,10 +59,14 @@ export default function CEHApp() {
           fetch('/api/students'),
           fetch('/api/settings'),
         ]);
-        const studentsData = await studentsRes.json();
-        setStudents(studentsData);
-        const settingsData = await settingsRes.json();
-        if (settingsData.avatarUrl) setAvatarUrl(settingsData.avatarUrl);
+        if (studentsRes.ok) {
+          const studentsData = await studentsRes.json();
+          if (Array.isArray(studentsData)) setStudents(studentsData);
+        }
+        if (settingsRes.ok) {
+          const settingsData = await settingsRes.json();
+          if (settingsData.avatarUrl) setAvatarUrl(settingsData.avatarUrl);
+        }
       } catch { /* silent */ }
     })();
   }, []);

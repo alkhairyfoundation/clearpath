@@ -54,8 +54,9 @@ export default function QuizTab() {
     const doFetch = async () => {
       try {
         const res = await fetch('/api/leaderboard');
+        if (!res.ok) return;
         const data = await res.json();
-        setLeaderboardData(data);
+        if (Array.isArray(data)) setLeaderboardData(data);
       } catch { /* silent */ }
     };
     doFetch();
@@ -72,6 +73,7 @@ export default function QuizTab() {
     setAnswered(false);
     setLifelines({ fiftyFifty: 1, skip: 1 });
     setStreak(0);
+    setRemovedOptions(new Set());
     setPhase('playing');
   };
 
@@ -157,8 +159,9 @@ export default function QuizTab() {
       const refreshLb = async () => {
         try {
           const res = await fetch('/api/leaderboard');
+          if (!res.ok) return;
           const data = await res.json();
-          setLeaderboardData(data);
+          if (Array.isArray(data)) setLeaderboardData(data);
         } catch { /* silent */ }
       };
       refreshLb();

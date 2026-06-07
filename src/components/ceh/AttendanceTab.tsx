@@ -40,8 +40,9 @@ export default function AttendanceTab({ students, onRefreshStudents }: Attendanc
   const fetchRecords = useCallback(async () => {
     try {
       const res = await fetch('/api/attendance');
+      if (!res.ok) return;
       const data = await res.json();
-      setRecords(data);
+      if (Array.isArray(data)) setRecords(data);
     } catch (err) {
       console.error('Failed to fetch attendance:', err);
     }

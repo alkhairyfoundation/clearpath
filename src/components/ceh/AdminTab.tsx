@@ -55,14 +55,16 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
   const fetchStudents = useCallback(async () => {
     try {
       const res = await fetch('/api/students');
+      if (!res.ok) return;
       const data = await res.json();
-      setStudents(data);
+      if (Array.isArray(data)) setStudents(data);
     } catch { /* silent */ }
   }, []);
 
   const fetchSettings = useCallback(async () => {
     try {
       const res = await fetch('/api/settings');
+      if (!res.ok) return;
       const data = await res.json();
       if (data.avatarUrl) setAvatarUrl(data.avatarUrl);
     } catch { /* silent */ }
@@ -71,24 +73,27 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
   const fetchAttendance = useCallback(async () => {
     try {
       const res = await fetch('/api/attendance');
+      if (!res.ok) return;
       const data = await res.json();
-      setAttendanceRecords(data);
+      if (Array.isArray(data)) setAttendanceRecords(data);
     } catch { /* silent */ }
   }, []);
 
   const fetchLeaderboard = useCallback(async () => {
     try {
       const res = await fetch('/api/leaderboard');
+      if (!res.ok) return;
       const data = await res.json();
-      setLeaderboard(data);
+      if (Array.isArray(data)) setLeaderboard(data);
     } catch { /* silent */ }
   }, []);
 
   const fetchHealth = useCallback(async () => {
     try {
       const res = await fetch('/api/health');
+      if (!res.ok) return;
       const data = await res.json();
-      setHealthData(data);
+      if (data && typeof data === 'object') setHealthData(data);
     } catch { /* silent */ }
   }, []);
 
