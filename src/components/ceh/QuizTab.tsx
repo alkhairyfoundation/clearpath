@@ -24,6 +24,7 @@ export default function QuizTab() {
   const [confettiPieces, setConfettiPieces] = useState<any[]>([]);
   
   const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  const timerRunningRef = useRef(false);
   const synthRef = useRef<SpeechSynthesis | null>(null);
 
   useEffect(() => {
@@ -74,11 +75,15 @@ export default function QuizTab() {
     setLifelines({ fiftyFifty: 1, skip: 1 });
     setStreak(0);
     setRemovedOptions(new Set());
+    timerRunningRef.current = false;
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = undefined;
+    }
     setPhase('playing');
   };
 
   // Timer effect
-  const timerRunningRef = useRef(false);
   useEffect(() => {
     if (phase !== 'playing' || answered) return;
     if (timerRunningRef.current) return;
@@ -127,7 +132,11 @@ export default function QuizTab() {
     if (lifelines.skip <= 0 || answered) return;
     setLifelines(prev => ({ ...prev, skip: prev.skip - 1 }));
     setRemovedOptions(new Set());
-    timerRunningRef.current = false;
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = undefined;
+      timerRunningRef.current = false;
+    }
     nextQuestion();
   };
 
@@ -196,7 +205,11 @@ export default function QuizTab() {
 
   const handleNextQuestion = () => {
     setRemovedOptions(new Set());
-    timerRunningRef.current = false;
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = undefined;
+      timerRunningRef.current = false;
+    }
     nextQuestion();
   };
 

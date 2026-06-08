@@ -36,8 +36,12 @@ export default function AssistantTab({ avatarUrl }: AssistantTabProps) {
   const [isListening, setIsListening] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [autoListen, setAutoListen] = useState(false);
-  const [speechSupported, setSpeechSupported] = useState(false);
-  const [recognitionSupported, setRecognitionSupported] = useState(false);
+  const [speechSupported] = useState(() => typeof window !== 'undefined' && 'speechSynthesis' in window);
+  const [recognitionSupported] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+  });
+  const [voicesLoaded, setVoicesLoaded] = useState(false);
   const [schoolContext, setSchoolContext] = useState<SchoolContext | null>(null);
   const [hasInteracted, setHasInteracted] = useState(false);
 
@@ -52,9 +56,6 @@ export default function AssistantTab({ avatarUrl }: AssistantTabProps) {
   const schoolContextRef = useRef(schoolContext);
   const ttsEnabledRef = useRef(ttsEnabled);
   const voicesLoadedRef = useRef(false);
-
-  const speechSupportedRef = useRef(false);
-  const recognitionSupportedRef = useRef(false);
 
   // Keep refs in sync
   useEffect(() => { inputRef.current = input; }, [input]);
@@ -178,15 +179,25 @@ export default function AssistantTab({ avatarUrl }: AssistantTabProps) {
     }
   }, []);
 
-  // Speech recognition setup
+  // Speech synthesis and recognition setup
   useEffect(() => {
     if (typeof window !== 'undefined') {
       synthRef.current = window.speechSynthesis;
-      speechSupportedRef.current = 'speechSynthesis' in window;
+
+      // Wait for voices to load
+      const loadVoices = () => {
+        const voices = synthRef.current?.getVoices() || [];
+        if (voices.length > 0 && !voicesLoadedRef.current) {
+          voicesLoadedRef.current = true;
+          setVoicesLoaded(true);
+        }
+      };
+      loadVoices();
+      if (speechSynthesis.onvoiceschanged !== undefined) {
+        speechSynthesis.onvoiceschanged = loadVoices;
+      }
 
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      recognitionSupportedRef.current = !!SpeechRecognition;
-
       if (SpeechRecognition) {
         const recognition = new SpeechRecognition();
         recognition.continuous = false;
@@ -201,7 +212,6 @@ export default function AssistantTab({ avatarUrl }: AssistantTabProps) {
           if (event.results[event.results.length - 1].isFinal) {
             setInput(transcript);
             setIsListening(false);
-            // Auto-submit recognized speech
             inputRef.current = transcript;
             sendMessage();
           } else {
@@ -220,13 +230,6 @@ export default function AssistantTab({ avatarUrl }: AssistantTabProps) {
       if (synthRef.current) synthRef.current.cancel();
       if (recognitionRef.current) recognitionRef.current.abort();
     };
-  }, []);
-
-  useEffect(() => {
-    setSpeechSupported(speechSupportedRef.current);
-  }, []);
-  useEffect(() => {
-    setRecognitionSupported(recognitionSupportedRef.current);
   }, []);
 
   const startListening = useCallback(() => {
@@ -257,15 +260,15 @@ export default function AssistantTab({ avatarUrl }: AssistantTabProps) {
     stopListeningRef.current = stopListening;
   }, [stopListening]);
 
-  // Speak welcome message on mount
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (ttsEnabledRef.current && synthRef.current) {
+  // Speak welcome message only after user interaction
+  const handleFirstInteraction = useCallback(() => {
+    if (!hasInteracted) {
+      setHasInteracted(true);
+      if (ttsEnabledRef.current && synthRef.current && voicesLoadedRef.current) {
         speak(welcomeMessage.content);
       }
-    }, 800);
-    return () => clearTimeout(timer);
-  }, []);
+    }
+  }, [hasInteracted, speak]);
 
   useEffect(() => {
     if (chatEndRef.current) {
@@ -384,7 +387,13 @@ export default function AssistantTab({ avatarUrl }: AssistantTabProps) {
         </div>
 
         {!speechSupported && (
-          <p className="text-xs text-amber-600 mt-2">Speech not supported in this browser</p>
+          <p className="text-xs text-amber-600 mt-2 text-center">Speech synthesis not supported. Try Chrome or Edge.</p>
+        )}
+        {speechSupported && !voicesLoaded && (
+          <p className="text-xs text-amber-600 mt-2 text-center">Loading voices...</p>
+        )}
+        {!recognitionSupported && speechSupported && (
+          <p className="text-xs text-gray-400 mt-1 text-center">Voice input requires Chrome or Edge</p>
         )}
       </div>
 
@@ -449,7 +458,7 @@ export default function AssistantTab({ avatarUrl }: AssistantTabProps) {
         <div className="border-t border-gray-100 p-3 bg-gray-50/50">
           <div className="flex items-center gap-2">
             <button
-              onClick={() => isListening ? stopListening() : startListening()}
+              onClick={() => { handleFirstInteraction(); if (isListening) stopListening(); else startListening(); }}
               disabled={!recognitionSupported}
               className={`flex-shrink-0 p-2.5 rounded-full transition-all ${
                 isListening
@@ -466,7 +475,8 @@ export default function AssistantTab({ avatarUrl }: AssistantTabProps) {
             <input
               type="text"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => { setInput(e.target.value); handleFirstInteraction(); }}
+              onFocus={handleFirstInteraction}
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
               placeholder={isListening ? "Listening..." : "Ask CEH AI anything..."}
               className="flex-1 px-4 py-2.5 bg-white rounded-full border border-gray-200 focus:border-[#d4a843] focus:ring-2 focus:ring-[#d4a843]/20 outline-none text-sm"
@@ -474,7 +484,7 @@ export default function AssistantTab({ avatarUrl }: AssistantTabProps) {
             />
 
             <button
-              onClick={() => sendMessage()}
+              onClick={() => { handleFirstInteraction(); sendMessage(); }}
               disabled={!input.trim() || isLoading}
               className="flex-shrink-0 p-2.5 rounded-full bg-[#d4a843] text-white hover:bg-[#d4a843]/80 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-[#d4a843]/20"
               title="Send message"

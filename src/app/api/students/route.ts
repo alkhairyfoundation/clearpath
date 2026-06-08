@@ -17,7 +17,7 @@ export async function GET() {
 
 // POST create student (admin only)
 export async function POST(req: NextRequest) {
-  const { authorized, response } = requireAdminAuth(req);
+  const { authorized, response } = await requireAdminAuth(req);
   if (!authorized) return response;
   try {
     const { name, email, department, faceImage } = await req.json();
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
 
 // DELETE student (admin only)
 export async function DELETE(req: NextRequest) {
-  const { authorized, response } = requireAdminAuth(req);
+  const { authorized, response } = await requireAdminAuth(req);
   if (!authorized) return response;
   try {
     const { id } = await req.json();

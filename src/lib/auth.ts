@@ -1,10 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { db } from '@/lib/db';
 
-const ADMIN_PIN = 'ceh2026';
+const DEFAULT_PIN = 'ceh2026';
 
-export function requireAdminAuth(req: NextRequest): { authorized: boolean; response?: NextResponse } {
+async function getAdminPin(): Promise<string> {
+  const envPin = process.env.ADMIN_PIN;
+  if (envPin) return envPin;
+
+  try {
+    const setting = await db.appSetting.findUnique({ where: { key: 'adminPin' } });
+    if (setting?.value) return setting.value;
+  } catch {}
+
+  return DEFAULT_PIN;
+}
+
+export async function requireAdminAuth(req: NextRequest): Promise<{ authorized: boolean; response?: NextResponse }> {
   const pin = req.headers.get('x-admin-pin');
-  if (pin !== ADMIN_PIN) {
+  if (!pin) {
+    return {
+      authorized: false,
+      response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+    };
+  }
+
+  const validPin = await getAdminPin();
+
+  if (pin !== validPin) {
     return {
       authorized: false,
       response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),

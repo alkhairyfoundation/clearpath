@@ -17,7 +17,7 @@ export async function GET() {
 
 // POST update settings (admin only)
 export async function POST(req: NextRequest) {
-  const { authorized, response } = requireAdminAuth(req);
+  const { authorized, response } = await requireAdminAuth(req);
   if (!authorized) return response;
   try {
     const { key, value } = await req.json();

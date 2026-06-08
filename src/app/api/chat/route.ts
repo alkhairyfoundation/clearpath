@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import ZAI from 'z-ai-web-dev-sdk';
+import { createChatCompletion } from '@/lib/openrouter';
 
 const BASE_SYSTEM_PROMPT = `You are CEH AI, the official AI assistant for ClearPath Edu Hub's End of Year / Graduation Ceremony. You are knowledgeable, friendly, and professional.
 
@@ -76,23 +76,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 });
     }
 
-    const zai = await ZAI.create();
-
     const systemPrompt = buildSystemPrompt(schoolContext);
 
     const messages = [
-      { role: 'system', content: systemPrompt },
+      { role: 'system' as const, content: systemPrompt },
       ...history.slice(-10),
-      { role: 'user', content: message }
+      { role: 'user' as const, content: message },
     ];
 
-    const completion = await zai.chat.completions.create({
-      messages,
+    const reply = await createChatCompletion(messages, {
       temperature: 0.7,
       max_tokens: 600,
     });
-
-    const reply = completion.choices?.[0]?.message?.content || "I'm sorry, I couldn't process that. Please try again.";
 
     return NextResponse.json({ reply });
   } catch (error: any) {
