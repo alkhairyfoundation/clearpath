@@ -15,19 +15,23 @@ export async function GET() {
   }
 }
 
-// POST create student (admin only)
+// POST create student (public - for self-registration via attendance)
 export async function POST(req: NextRequest) {
-  const { authorized, response } = await requireAdminAuth(req);
-  if (!authorized) return response;
   try {
-    const { name, email, department, faceImage } = await req.json();
+    const { name, email, department, faceImage, faceDescriptor } = await req.json();
     
     if (!name || !email || !department) {
       return NextResponse.json({ error: 'Name, email, and department are required' }, { status: 400 });
     }
 
     const student = await db.student.create({
-      data: { name, email, department, faceImage: faceImage || null },
+      data: {
+        name,
+        email,
+        department,
+        faceImage: faceImage || null,
+        faceDescriptor: faceDescriptor || null,
+      },
     });
     
     return NextResponse.json(student, { status: 201 });

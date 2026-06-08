@@ -31,6 +31,7 @@ export default function CEHApp() {
   const [students, setStudents] = useState<Student[]>([]);
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [assistantAutoSpeak, setAssistantAutoSpeak] = useState(false);
 
   const fetchStudents = useCallback(async () => {
     try {
@@ -96,7 +97,7 @@ export default function CEHApp() {
             {tabs.map(tab => (
               <button
                 key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
+                onClick={() => { if (tab.key === 'assistant') setAssistantAutoSpeak(true); setActiveTab(tab.key); }}
                 className={`px-3 py-2 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
                   activeTab === tab.key 
                     ? 'bg-white/20 text-white' 
@@ -131,7 +132,7 @@ export default function CEHApp() {
                 {tabs.map(tab => (
                   <button
                     key={tab.key}
-                    onClick={() => { setActiveTab(tab.key); setMobileMenuOpen(false); }}
+                    onClick={() => { if (tab.key === 'assistant') setAssistantAutoSpeak(true); setActiveTab(tab.key); setMobileMenuOpen(false); }}
                     className={`w-full px-3 py-2.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
                       activeTab === tab.key ? 'bg-white/20 text-white' : 'text-white/60 hover:bg-white/10'
                     }`}
@@ -150,9 +151,9 @@ export default function CEHApp() {
       {/* Main Content */}
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6">
         <AnimatePresence mode="wait">
-          {activeTab === 'home' && <HomeTab key="home" onNavigate={setActiveTab} studentCount={students.length} />}
-          {activeTab === 'assistant' && <motion.div key="assistant" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}><ErrorBoundary componentName="AI Assistant"><AssistantTab avatarUrl={avatarUrl} /></ErrorBoundary></motion.div>}
-          {activeTab === 'attendance' && <motion.div key="attendance" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}><ErrorBoundary componentName="Attendance"><AttendanceTab students={students} onRefreshStudents={fetchStudents} /></ErrorBoundary></motion.div>}
+          {activeTab === 'home' && <HomeTab key="home" onNavigate={(tab) => { if (tab === 'assistant') setAssistantAutoSpeak(true); setActiveTab(tab); }} studentCount={students.length} />}
+          {activeTab === 'assistant' && <motion.div key="assistant" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}><ErrorBoundary componentName="AI Assistant"><AssistantTab avatarUrl={avatarUrl} autoSpeak={assistantAutoSpeak} /></ErrorBoundary></motion.div>}
+          {activeTab === 'attendance' && <motion.div key="attendance" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}><ErrorBoundary componentName="Attendance"><AttendanceTab /></ErrorBoundary></motion.div>}
           {activeTab === 'quiz' && <motion.div key="quiz" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}><ErrorBoundary componentName="Quiz"><QuizTab /></ErrorBoundary></motion.div>}
           {activeTab === 'admin' && <motion.div key="admin" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}><ErrorBoundary componentName="Admin"><AdminTab onStudentChange={handleStudentChange} /></ErrorBoundary></motion.div>}
         </AnimatePresence>

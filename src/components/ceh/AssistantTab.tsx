@@ -12,6 +12,7 @@ interface Message {
 
 interface AssistantTabProps {
   avatarUrl?: string;
+  autoSpeak?: boolean;
 }
 
 interface SchoolContext {
@@ -27,7 +28,7 @@ const welcomeMessage: Message = {
   timestamp: new Date()
 };
 
-export default function AssistantTab({ avatarUrl }: AssistantTabProps) {
+export default function AssistantTab({ avatarUrl, autoSpeak }: AssistantTabProps) {
   const [messages, setMessages] = useState<Message[]>([welcomeMessage]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -260,15 +261,26 @@ export default function AssistantTab({ avatarUrl }: AssistantTabProps) {
     stopListeningRef.current = stopListening;
   }, [stopListening]);
 
-  // Speak welcome message only after user interaction
-  const handleFirstInteraction = useCallback(() => {
-    if (!hasInteracted) {
+  // Speak welcome message on navigation or first interaction
+  const doGreeting = useCallback(() => {
+    if (ttsEnabledRef.current && synthRef.current && voicesLoadedRef.current && !hasInteracted) {
       setHasInteracted(true);
-      if (ttsEnabledRef.current && synthRef.current && voicesLoadedRef.current) {
-        speak(welcomeMessage.content);
-      }
+      speak(welcomeMessage.content);
     }
   }, [hasInteracted, speak]);
+
+  const handleFirstInteraction = useCallback(() => {
+    if (!hasInteracted) {
+      doGreeting();
+    }
+  }, [hasInteracted, doGreeting]);
+
+  useEffect(() => {
+    if (autoSpeak) {
+      const timer = setTimeout(() => doGreeting(), 200);
+      return () => clearTimeout(timer);
+    }
+  }, [autoSpeak, doGreeting]);
 
   useEffect(() => {
     if (chatEndRef.current) {

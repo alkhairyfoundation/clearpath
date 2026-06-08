@@ -9,13 +9,14 @@ datasource db {
 }
 
 model Student {
-  id            String      @id @default(cuid())
-  name          String
-  email         String      @unique
-  department    String
-  faceImage     String?     @db.Text
-  registeredAt  DateTime    @default(now())
-  attendance    Attendance[]
+  id              String      @id @default(cuid())
+  name            String
+  email           String      @unique
+  department      String
+  faceImage       String?     @db.Text
+  faceDescriptor  Json?
+  registeredAt    DateTime    @default(now())
+  attendance      Attendance[]
 }
 
 model Attendance {
