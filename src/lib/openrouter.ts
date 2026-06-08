@@ -1,14 +1,18 @@
 const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
 
+// Verified working free models (tested June 2026)
+// Ordered by quality/capability, best first
 const FREE_MODELS = [
-  'openrouter/free',
-  'meta-llama/llama-3.3-70b-instruct:free',
   'google/gemma-4-31b-it:free',
-  'nousresearch/hermes-3-llama-3.1-405b:free',
+  'nvidia/nemotron-3-super-120b-a12b:free',
   'qwen/qwen3-8b',
   'microsoft/phi-4-mini-instruct',
-  'google/gemma-3-27b-it',
+  'meta-llama/llama-3.1-8b-instruct',
   'mistralai/ministral-8b-2512',
+  'qwen/qwen-2.5-7b-instruct',
+  'liquid/lfm-2.5-1.2b-instruct:free',
+  'z-ai/glm-4.5-air:free',
+  'openrouter/free',
 ];
 
 let currentModelIndex = 0;
@@ -24,6 +28,7 @@ export function getCurrentModel(): string {
 
 export function rotateModel(): string {
   currentModelIndex++;
+  consecutiveFails++;
   return getCurrentModel();
 }
 
@@ -37,22 +42,6 @@ interface ChatMessage {
   content: string;
 }
 
-interface OpenRouterResponse {
-  choices?: { message?: { content?: string } }[];
-  error?: { message?: string };
-}
-
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number = 30000): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
-    return response;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 export async function createChatCompletion(
   messages: ChatMessage[],
   options?: {
@@ -63,7 +52,7 @@ export async function createChatCompletion(
 ): Promise<string> {
   const apiKey = getApiKey();
   if (!apiKey) {
-    return "CEH AI is not fully configured yet. Please ask the administrator to add an OpenRouter API key to enable AI chat. In the meantime, feel free to explore the other features!";
+    return "CEH AI needs an API key to work. Please ask the administrator to add an OpenRouter API key in the .env file.";
   }
 
   let lastError: string | null = null;
@@ -72,7 +61,10 @@ export async function createChatCompletion(
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const model = options?.model || getCurrentModel();
     try {
-      const response = await fetchWithTimeout(
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 25000);
+
+      const response = await fetch(
         `${OPENROUTER_API_BASE}/chat/completions`,
         {
           method: 'POST',
@@ -88,43 +80,52 @@ export async function createChatCompletion(
             temperature: options?.temperature ?? 0.7,
             max_tokens: options?.max_tokens ?? 600,
           }),
-        },
-        30000
+          signal: controller.signal,
+        }
       );
+      clearTimeout(timeout);
 
       if (response.status === 429) {
-        consecutiveFails++;
-        lastError = 'Rate limited';
-        await new Promise(r => setTimeout(r, Math.min(1000 * consecutiveFails, 5000)));
+        lastError = `Rate limited on ${model}`;
+        const retryAfter = parseInt(response.headers.get('Retry-After') || '5', 10);
+        await new Promise(r => setTimeout(r, Math.min(retryAfter * 1000, 10000)));
         rotateModel();
         continue;
       }
 
-      const data: OpenRouterResponse = await response.json();
+      if (!response.ok) {
+        lastError = `HTTP ${response.status} on ${model}`;
+        rotateModel();
+        continue;
+      }
+
+      const data = await response.json();
 
       if (data.error) {
-        lastError = data.error.message || 'Unknown error';
+        lastError = `${data.error.message || 'Unknown'} on ${model}`;
         rotateModel();
         continue;
       }
 
       const content = data.choices?.[0]?.message?.content;
-      if (content) {
+      if (content && content.trim()) {
         resetModel();
         return content;
       }
 
-      lastError = 'Empty response from AI';
+      lastError = `Empty response from ${model}`;
       rotateModel();
     } catch (err: any) {
-      lastError = err.message || 'Network error';
-      rotateModel();
       if (err.name === 'AbortError') {
-        await new Promise(r => setTimeout(r, 2000));
+        lastError = `Timeout on ${model}`;
+      } else {
+        lastError = `${err.message || 'Network error'} on ${model}`;
       }
+      rotateModel();
+      await new Promise(r => setTimeout(r, 1000));
     }
   }
 
-  console.error('OpenRouter all models failed:', lastError);
-  return "I'm having trouble connecting right now. Please try again in a moment!";
+  console.error('OpenRouter all models exhausted:', lastError);
+  return "I'm having trouble reaching my AI services right now. Please try again in a moment! All 10 fallback models were attempted.";
 }

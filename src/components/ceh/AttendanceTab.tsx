@@ -4,7 +4,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Camera, CameraOff, UserCheck, Users, CheckCircle, AlertCircle,
-  RefreshCw, UserPlus, ScanFace, Loader2, Smile
+  RefreshCw, UserPlus, ScanFace, Loader2, Smile, Fingerprint,
+  User
 } from 'lucide-react';
 import { loadFaceModels, getFaceDescriptor, findBestMatch, captureFrame } from '@/lib/face-recognition';
 
@@ -25,10 +26,10 @@ interface AttendanceRecord {
   method: string;
 }
 
-type Mode = 'checkin' | 'register';
+type Flow = 'checkin' | 'enroll' | 'register';
 
 export default function AttendanceTab() {
-  const [mode, setMode] = useState<Mode>('checkin');
+  const [flow, setFlow] = useState<Flow>('checkin');
   const [students, setStudents] = useState<Student[]>([]);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [cameraOn, setCameraOn] = useState(false);
@@ -40,6 +41,11 @@ export default function AttendanceTab() {
   // Check-in state
   const [recognizedStudent, setRecognizedStudent] = useState<Student | null>(null);
   const [recognizing, setRecognizing] = useState(false);
+  const [recognitionStatus, setRecognitionStatus] = useState<'idle' | 'scanning' | 'found' | 'failed'>('idle');
+
+  // Enroll state
+  const [enrollStudentId, setEnrollStudentId] = useState('');
+  const [enrollStep, setEnrollStep] = useState<'select' | 'capture' | 'done'>('select');
 
   // Registration state
   const [regName, setRegName] = useState('');
@@ -52,6 +58,7 @@ export default function AttendanceTab() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  const stopCameraRef = useRef<() => void>(() => {});
 
   const notify = (type: 'success' | 'error' | 'info', msg: string) => {
     setNotification({ type, msg });
@@ -64,25 +71,27 @@ export default function AttendanceTab() {
     const ok = await loadFaceModels();
     setModelsLoaded(ok);
     setLoadingModels(false);
-    if (!ok) notify('error', 'Failed to load face recognition models. Check your internet.');
+    if (!ok) notify('error', 'Failed to load face recognition models.');
     return ok;
   };
 
   const fetchStudents = useCallback(async () => {
     try {
       const res = await fetch('/api/students');
-      if (!res.ok) return;
-      const data = await res.json();
-      if (Array.isArray(data)) setStudents(data);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) setStudents(data);
+      }
     } catch {}
   }, []);
 
   const fetchRecords = useCallback(async () => {
     try {
       const res = await fetch('/api/attendance');
-      if (!res.ok) return;
-      const data = await res.json();
-      if (Array.isArray(data)) setRecords(data);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) setRecords(data);
+      }
     } catch {}
   }, []);
 
@@ -94,11 +103,28 @@ export default function AttendanceTab() {
     fetchRecords();
   }, []);
 
-  const stopCameraRef = useRef<() => void>(() => {});
-
   useEffect(() => {
     return () => { stopCameraRef.current(); };
   }, []);
+
+  const stopCamera = useCallback(() => {
+    if (scanIntervalRef.current) {
+      clearInterval(scanIntervalRef.current);
+      scanIntervalRef.current = undefined;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+    setCameraOn(false);
+    setRecognizedStudent(null);
+    setRecognizing(false);
+    setRecognitionStatus('idle');
+  }, []);
+
+  useEffect(() => {
+    stopCameraRef.current = stopCamera;
+  }, [stopCamera]);
 
   const startCamera = async () => {
     try {
@@ -116,47 +142,38 @@ export default function AttendanceTab() {
     }
   };
 
-  const stopCamera = () => {
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
-      scanIntervalRef.current = undefined;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-    }
-    setCameraOn(false);
-    setRecognizedStudent(null);
-    setRecognizing(false);
-  };
-
-  useEffect(() => {
-    stopCameraRef.current = stopCamera;
-  }, [stopCamera]);
-
-  // Face recognition scanning (check-in mode)
+  // ----- FACE CHECK-IN -----
   const startFaceScan = async () => {
     if (!videoRef.current || !modelsLoaded) return;
     setRecognizing(true);
-    const registered = students.filter(s => s.faceDescriptor && Array.isArray(s.faceDescriptor));
+    setRecognitionStatus('scanning');
+    const enrolled = students.filter(s => s.faceDescriptor && Array.isArray(s.faceDescriptor));
+
+    if (enrolled.length === 0) {
+      notify('info', 'No students have enrolled faces yet. Use "Enroll Face" first.');
+      setRecognizing(false);
+      setRecognitionStatus('failed');
+      return;
+    }
 
     scanIntervalRef.current = setInterval(async () => {
       if (!videoRef.current || !streamRef.current) return;
       try {
         const descriptor = await getFaceDescriptor(videoRef.current);
-        if (descriptor && registered.length > 0) {
+        if (descriptor) {
           const match = findBestMatch(
             descriptor,
-            registered.map(s => ({ studentId: s.id, descriptor: s.faceDescriptor as number[] }))
+            enrolled.map(s => ({ studentId: s.id, descriptor: s.faceDescriptor as number[] }))
           );
           if (match.match) {
             const student = students.find(s => s.id === match.studentId);
             if (student) {
-              setRecognizedStudent(student);
-              clearInterval(scanIntervalRef.current);
+              clearInterval(scanIntervalRef.current!);
               scanIntervalRef.current = undefined;
+              setRecognizedStudent(student);
               setRecognizing(false);
-              handleMarkAttendance(student.id);
+              setRecognitionStatus('found');
+              markAttendance(student.id);
             }
           }
         }
@@ -164,15 +181,7 @@ export default function AttendanceTab() {
     }, 1500);
   };
 
-  const stopFaceScan = () => {
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
-      scanIntervalRef.current = undefined;
-    }
-    setRecognizing(false);
-  };
-
-  const handleMarkAttendance = async (studentId: string) => {
+  const markAttendance = async (studentId: string) => {
     setProcessing(true);
     try {
       const snapshot = videoRef.current ? captureFrame(videoRef.current) : undefined;
@@ -183,23 +192,58 @@ export default function AttendanceTab() {
       });
       const data = await res.json();
       if (res.ok) {
-        notify('success', `Welcome, ${data.student?.name || 'Student'}!`);
-        stopCamera();
+        notify('success', `Welcome, ${data.student?.name || 'Student'}! ✓`);
+        setTimeout(() => stopCamera(), 2000);
         fetchRecords();
       } else if (res.status === 409) {
-        notify('info', `${data.record?.student?.name || 'Student'} already marked present.`);
-        stopCamera();
+        notify('info', `${data.record?.student?.name || 'Student'} already checked in.`);
+        setTimeout(() => stopCamera(), 2000);
       } else {
-        notify('error', data.error || 'Failed to mark attendance.');
+        notify('error', data.error || 'Failed.');
+        setRecognitionStatus('idle');
       }
     } catch {
       notify('error', 'Failed to mark attendance.');
+      setRecognitionStatus('idle');
     } finally {
       setProcessing(false);
     }
   };
 
-  // Face capture for registration
+  // ----- FACE ENROLLMENT (for existing students) -----
+  const captureFaceForEnroll = async () => {
+    if (!videoRef.current || !modelsLoaded) return;
+    setProcessing(true);
+    try {
+      const descriptor = await getFaceDescriptor(videoRef.current);
+      if (descriptor) {
+        const res = await fetch('/api/students/enroll-face', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studentId: enrollStudentId,
+            faceDescriptor: descriptor,
+            faceImage: captureFrame(videoRef.current),
+          }),
+        });
+        if (res.ok) {
+          setEnrollStep('done');
+          notify('success', 'Face enrolled successfully! Student can now use auto check-in.');
+          fetchStudents();
+        } else {
+          notify('error', 'Failed to save face data.');
+        }
+      } else {
+        notify('error', 'No face detected. Ensure good lighting and face visibility.');
+      }
+    } catch {
+      notify('error', 'Failed to capture face.');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // ----- NEW REGISTRATION + FACE ENROLL -----
   const captureFaceForRegistration = async () => {
     if (!videoRef.current || !modelsLoaded) return;
     setProcessing(true);
@@ -207,10 +251,9 @@ export default function AttendanceTab() {
       const descriptor = await getFaceDescriptor(videoRef.current);
       if (descriptor) {
         setRegFaceDescriptor(descriptor);
-        const frame = captureFrame(videoRef.current);
-        setRegFaceImage(frame);
+        setRegFaceImage(captureFrame(videoRef.current));
         setRegStep('done');
-        notify('success', 'Face captured successfully!');
+        notify('success', 'Face captured!');
       } else {
         notify('error', 'No face detected. Ensure your face is visible and well-lit.');
       }
@@ -223,7 +266,7 @@ export default function AttendanceTab() {
 
   const handleRegister = async () => {
     if (!regName || !regEmail || !regDepartment) {
-      notify('error', 'All fields are required.');
+      notify('error', 'All fields required.');
       return;
     }
     if (!regFaceDescriptor) {
@@ -244,12 +287,9 @@ export default function AttendanceTab() {
         }),
       });
       if (res.ok) {
-        notify('success', `${regName} registered successfully!`);
-        setRegName('');
-        setRegEmail('');
-        setRegDepartment('');
-        setRegFaceDescriptor(null);
-        setRegFaceImage(null);
+        notify('success', `${regName} registered & face enrolled!`);
+        setRegName(''); setRegEmail(''); setRegDepartment('');
+        setRegFaceDescriptor(null); setRegFaceImage(null);
         setRegStep('form');
         stopCamera();
         fetchStudents();
@@ -264,11 +304,14 @@ export default function AttendanceTab() {
     }
   };
 
-  const presentStudentIds = new Set(records.map(r => r.studentId));
-  const absentStudents = students.filter(s => !presentStudentIds.has(s.id));
+  // ----- UTILITIES -----
+  const presentIds = new Set(records.map(r => r.studentId));
+  const studentsWithoutFace = students.filter(s => !s.faceDescriptor);
+  const studentsWithFace = students.filter(s => s.faceDescriptor);
 
   return (
     <div className="space-y-6">
+      {/* Notifications */}
       <AnimatePresence>
         {notification && (
           <motion.div
@@ -281,55 +324,57 @@ export default function AttendanceTab() {
               'bg-blue-50 text-blue-700 border border-blue-200'
             }`}
           >
-            {notification.type === 'success' ? <CheckCircle className="w-4 h-4" /> :
-             notification.type === 'error' ? <AlertCircle className="w-4 h-4" /> :
-             <AlertCircle className="w-4 h-4" />}
+            {notification.type === 'success' ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
             {notification.msg}
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Mode Toggle */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => { setMode('checkin'); setRegStep('form'); if (cameraOn) stopCamera(); }}
-          className={`flex-1 py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
-            mode === 'checkin' ? 'bg-[#1a4d2e] text-white' : 'bg-white text-gray-600 border border-gray-200'
-          }`}
-        >
-          <ScanFace className="w-5 h-5" /> Check In (Face Recognition)
-        </button>
-        <button
-          onClick={() => { setMode('register'); if (cameraOn) stopCamera(); }}
-          className={`flex-1 py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
-            mode === 'register' ? 'bg-[#d4a843] text-[#1a4d2e]' : 'bg-white text-gray-600 border border-gray-200'
-          }`}
-        >
-          <UserPlus className="w-5 h-5" /> Register New
-        </button>
+      {/* Flow Selector */}
+      <div className="grid grid-cols-3 gap-2">
+        {[
+          { key: 'checkin' as Flow, label: 'Auto Check-in', icon: ScanFace, color: 'bg-[#1a4d2e] text-white' },
+          { key: 'enroll' as Flow, label: 'Enroll Face', icon: Fingerprint, color: 'bg-[#d4a843] text-[#1a4d2e]' },
+          { key: 'register' as Flow, label: 'New Registration', icon: UserPlus, color: 'bg-blue-600 text-white' },
+        ].map(f => (
+          <button
+            key={f.key}
+            onClick={() => { setFlow(f.key); if (cameraOn) stopCamera(); }}
+            className={`py-2.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
+              flow === f.key ? f.color : 'bg-white text-gray-600 border border-gray-200'
+            }`}
+          >
+            <f.icon className="w-4 h-4" /> {f.label}
+          </button>
+        ))}
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-4 gap-3">
         <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 text-center">
-          <Users className="w-6 h-6 text-[#1a4d2e] mx-auto mb-1" />
-          <p className="text-xl font-bold text-[#1a4d2e]">{students.length}</p>
-          <p className="text-[10px] text-gray-500">Registered</p>
+          <Users className="w-5 h-5 text-[#1a4d2e] mx-auto mb-1" />
+          <p className="text-lg font-bold text-[#1a4d2e]">{students.length}</p>
+          <p className="text-[9px] text-gray-500">Registered</p>
         </div>
         <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 text-center">
-          <UserCheck className="w-6 h-6 text-green-600 mx-auto mb-1" />
-          <p className="text-xl font-bold text-green-600">{records.length}</p>
-          <p className="text-[10px] text-gray-500">Present</p>
+          <Smile className="w-5 h-5 text-green-600 mx-auto mb-1" />
+          <p className="text-lg font-bold text-green-600">{studentsWithFace.length}</p>
+          <p className="text-[9px] text-gray-500">Face Enrolled</p>
         </div>
         <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 text-center">
-          <Smile className="w-6 h-6 text-[#d4a843] mx-auto mb-1" />
-          <p className="text-xl font-bold text-[#d4a843]">{absentStudents.length}</p>
-          <p className="text-[10px] text-gray-500">Available</p>
+          <UserCheck className="w-5 h-5 text-blue-600 mx-auto mb-1" />
+          <p className="text-lg font-bold text-blue-600">{records.length}</p>
+          <p className="text-[9px] text-gray-500">Checked In</p>
+        </div>
+        <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 text-center">
+          <User className="w-5 h-5 text-amber-500 mx-auto mb-1" />
+          <p className="text-lg font-bold text-amber-500">{studentsWithoutFace.length}</p>
+          <p className="text-[9px] text-gray-500">Need Enroll</p>
         </div>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">
-        {/* Camera Section */}
+        {/* ====== CAMERA SECTION ====== */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="bg-[#1a4d2e] text-white p-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -348,6 +393,7 @@ export default function AttendanceTab() {
 
           <div className="aspect-video bg-gray-900 relative">
             <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+
             {!cameraOn && (
               <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
                 <div className="text-center text-gray-400">
@@ -358,17 +404,25 @@ export default function AttendanceTab() {
               </div>
             )}
 
-            {/* Face detected overlay */}
-            {cameraOn && recognizedStudent && (
+            {/* Recognition overlay */}
+            {cameraOn && recognitionStatus === 'found' && recognizedStudent && (
               <div className="absolute inset-0 flex items-center justify-center">
-                <div className="border-4 border-green-400 rounded-lg w-48 h-48 opacity-60" />
-                <div className="absolute bottom-4 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
-                  {recognizedStudent.name} ✓
+                <div className="border-4 border-green-400 rounded-lg w-48 h-48 opacity-70" />
+                <div className="absolute bottom-4 left-4 right-4 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium text-center">
+                  ✓ {recognizedStudent.name}
                 </div>
               </div>
             )}
 
-            {/* Model loading indicator */}
+            {cameraOn && recognitionStatus === 'scanning' && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="border-2 border-[#d4a843] rounded-lg w-48 h-48 opacity-50 animate-pulse" />
+                <div className="absolute bottom-4 bg-black/60 text-white text-xs px-3 py-1 rounded-full flex items-center gap-1">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Scanning...
+                </div>
+              </div>
+            )}
+
             {loadingModels && cameraOn && (
               <div className="absolute top-2 left-2 bg-black/60 text-white text-xs px-3 py-1 rounded-full flex items-center gap-1">
                 <Loader2 className="w-3 h-3 animate-spin" /> Loading AI models...
@@ -376,124 +430,125 @@ export default function AttendanceTab() {
             )}
           </div>
 
-          {/* Mode-specific controls */}
-          {cameraOn && mode === 'checkin' && (
+          {/* Camera Controls by Flow */}
+          {cameraOn && flow === 'checkin' && (
             <div className="p-4 border-t border-gray-100">
-              {recognizedStudent ? (
-                <div className="text-center">
-                  <p className="text-sm font-semibold text-green-700">✓ Face Recognized</p>
-                  <p className="text-xs text-gray-500 mt-1">Attendance being processed...</p>
-                </div>
-              ) : recognizing ? (
-                <div className="text-center">
-                  <Loader2 className="w-5 h-5 animate-spin text-[#1a4d2e] mx-auto mb-1" />
-                  <p className="text-sm text-gray-600">Scanning for faces...</p>
-                  <button onClick={stopFaceScan} className="mt-2 text-xs text-red-500 underline">Stop</button>
-                </div>
+              {recognitionStatus === 'found' ? (
+                <p className="text-center text-sm text-green-700 font-medium flex items-center justify-center gap-1">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Marking attendance...
+                </p>
+              ) : recognitionStatus === 'scanning' ? (
+                <button onClick={() => { stopCamera(); }} className="w-full py-2.5 bg-red-50 text-red-600 rounded-xl text-sm font-medium hover:bg-red-100">
+                  Stop Scanning
+                </button>
               ) : (
                 <button
                   onClick={startFaceScan}
-                  disabled={!modelsLoaded || students.length === 0}
+                  disabled={!modelsLoaded || studentsWithFace.length === 0}
                   className="w-full py-2.5 bg-[#1a4d2e] text-white rounded-xl text-sm font-medium hover:bg-[#1a4d2e]/80 disabled:opacity-40 flex items-center justify-center gap-2"
                 >
                   <ScanFace className="w-4 h-4" />
-                  {students.length === 0 ? 'No registered students' : 'Start Face Recognition'}
+                  {studentsWithFace.length === 0 ? 'No enrolled faces yet' : 'Start Face Recognition'}
                 </button>
               )}
             </div>
           )}
 
-          {/* Registration capture controls */}
-          {cameraOn && mode === 'register' && (
+          {cameraOn && flow === 'enroll' && (
             <div className="p-4 border-t border-gray-100">
-              {regStep === 'capture' && (
-                <div className="text-center">
-                  <p className="text-sm text-gray-600 mb-2">Position your face in the camera and click capture</p>
-                  <button
-                    onClick={captureFaceForRegistration}
-                    disabled={processing}
-                    className="w-full py-2.5 bg-[#d4a843] text-[#1a4d2e] rounded-xl text-sm font-bold hover:bg-[#d4a843]/80 disabled:opacity-40 flex items-center justify-center gap-2"
-                  >
-                    {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
-                    Capture Face
-                  </button>
-                </div>
+              {enrollStep === 'capture' && (
+                <button
+                  onClick={captureFaceForEnroll}
+                  disabled={processing}
+                  className="w-full py-2.5 bg-[#d4a843] text-[#1a4d2e] rounded-xl text-sm font-bold hover:bg-[#d4a843]/80 disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+                  Capture Face to Enroll
+                </button>
               )}
-              {regStep === 'done' && (
-                <div className="text-center">
-                  <CheckCircle className="w-6 h-6 text-green-600 mx-auto mb-1" />
-                  <p className="text-sm text-green-700 font-medium">Face captured! Complete registration below.</p>
-                </div>
+              {enrollStep === 'done' && (
+                <p className="text-center text-sm text-green-700 font-medium flex items-center justify-center gap-1">
+                  <CheckCircle className="w-4 h-4" /> Face enrolled successfully!
+                </p>
               )}
+            </div>
+          )}
+
+          {cameraOn && flow === 'register' && regStep === 'capture' && (
+            <div className="p-4 border-t border-gray-100">
+              <button
+                onClick={captureFaceForRegistration}
+                disabled={processing}
+                className="w-full py-2.5 bg-[#d4a843] text-[#1a4d2e] rounded-xl text-sm font-bold hover:bg-[#d4a843]/80 disabled:opacity-40 flex items-center justify-center gap-2"
+              >
+                {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+                Capture Face
+              </button>
+            </div>
+          )}
+
+          {cameraOn && flow === 'register' && regStep === 'done' && (
+            <div className="p-4 border-t border-gray-100">
+              <p className="text-center text-sm text-green-700 font-medium flex items-center justify-center gap-1">
+                <CheckCircle className="w-4 h-4" /> Face captured! Complete registration.
+              </p>
             </div>
           )}
         </div>
 
-        {/* Right Panel: Based on mode */}
+        {/* ====== RIGHT PANEL ====== */}
         <div className="space-y-4">
-          {mode === 'checkin' ? (
+          {/* FLOW: CHECK-IN (Manual) */}
+          {flow === 'checkin' && (
             <>
-              {/* Manual check-in */}
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-                <p className="text-sm font-medium text-gray-700 mb-2">Manual Check-in</p>
+                <p className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-1.5">
+                  <UserCheck className="w-4 h-4 text-[#1a4d2e]" /> Manual Check-in
+                </p>
                 <div className="flex gap-2">
                   <select
-                    onChange={(e) => {
-                      if (e.target.value) handleMarkAttendance(e.target.value);
-                    }}
+                    onChange={(e) => { if (e.target.value) markAttendance(e.target.value); }}
                     className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none"
                     defaultValue=""
                   >
                     <option value="" disabled>Select student...</option>
-                    {absentStudents.map(s => (
-                      <option key={s.id} value={s.id}>{s.name} - {s.department}</option>
+                    {students.filter(s => !presentIds.has(s.id)).map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} {!s.faceDescriptor ? '(no face)' : ''} - {s.department}
+                      </option>
                     ))}
                   </select>
                 </div>
+                {students.filter(s => !presentIds.has(s.id)).length === 0 && students.length > 0 && (
+                  <p className="text-xs text-green-600 mt-2 text-center">All students checked in today!</p>
+                )}
               </div>
 
-              {/* Attendance Records */}
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                 <div className="bg-[#1a4d2e] text-white p-4 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle className="w-5 h-5" />
-                    <span className="font-semibold">Attendance Records</span>
-                  </div>
-                  <button onClick={fetchRecords} className="p-1 hover:bg-white/10 rounded">
-                    <RefreshCw className="w-4 h-4" />
-                  </button>
+                  <span className="font-semibold">Today's Attendance</span>
+                  <button onClick={fetchRecords} className="p-1 hover:bg-white/10 rounded"><RefreshCw className="w-4 h-4" /></button>
                 </div>
-                <div className="max-h-[300px] overflow-y-auto">
+                <div className="max-h-[260px] overflow-y-auto">
                   {records.length === 0 ? (
-                    <div className="p-6 text-center text-gray-400">
-                      <UserCheck className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-xs">No records yet</p>
-                    </div>
+                    <div className="p-6 text-center text-gray-400"><UserCheck className="w-8 h-8 mx-auto mb-2 opacity-50" /><p className="text-xs">No check-ins yet</p></div>
                   ) : (
                     records.map((r, i) => (
-                      <motion.div
-                        key={r.id}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.03 }}
+                      <motion.div key={r.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.03 }}
                         className="flex items-center justify-between p-3 border-b border-gray-50 hover:bg-gray-50/50"
                       >
                         <div className="flex items-center gap-2">
                           <CheckCircle className="w-4 h-4 text-green-600" />
                           <div>
-                            <p className="text-sm font-medium text-gray-800">{r.student.name}</p>
+                            <p className="text-sm font-medium">{r.student.name}</p>
                             <p className="text-[10px] text-gray-400">{r.student.department}</p>
                           </div>
                         </div>
                         <div className="text-right">
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full ${
-                            r.method === 'face' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
-                          }`}>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full ${r.method === 'face' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
                             {r.method === 'face' ? 'Face' : 'Manual'}
                           </span>
-                          <p className="text-[10px] text-gray-400 mt-0.5">
-                            {new Date(r.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </p>
+                          <p className="text-[10px] text-gray-400 mt-0.5">{new Date(r.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
                         </div>
                       </motion.div>
                     ))
@@ -501,11 +556,74 @@ export default function AttendanceTab() {
                 </div>
               </div>
             </>
-          ) : (
-            /* Registration Form */
+          )}
+
+          {/* FLOW: ENROLL FACE */}
+          {flow === 'enroll' && (
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
               <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                <UserPlus className="w-5 h-5 text-[#d4a843]" /> New Registration
+                <Fingerprint className="w-5 h-5 text-[#d4a843]" /> Enroll Face for Existing Student
+              </h3>
+              <p className="text-xs text-gray-500 mb-4">
+                Select a registered student who hasn't enrolled their face yet. They'll then be recognized automatically during check-in.
+              </p>
+
+              {enrollStep === 'select' && (
+                <div className="space-y-3">
+                  {studentsWithoutFace.length === 0 ? (
+                    <div className="text-center py-4 text-gray-400">
+                      <CheckCircle className="w-8 h-8 mx-auto mb-2 text-green-400" />
+                      <p className="text-sm">All registered students have enrolled faces!</p>
+                    </div>
+                  ) : (
+                    <>
+                      <select
+                        value={enrollStudentId}
+                        onChange={(e) => setEnrollStudentId(e.target.value)}
+                        className="w-full px-3 py-2.5 rounded-lg border border-gray-200 text-sm outline-none"
+                      >
+                        <option value="">Select a student...</option>
+                        {studentsWithoutFace.map(s => (
+                          <option key={s.id} value={s.id}>{s.name} - {s.department}</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => {
+                          if (!enrollStudentId) { notify('error', 'Select a student first.'); return; }
+                          setEnrollStep('capture');
+                          if (!cameraOn) startCamera();
+                        }}
+                        disabled={!enrollStudentId}
+                        className="w-full py-2.5 bg-[#d4a843] text-[#1a4d2e] rounded-xl text-sm font-bold hover:bg-[#d4a843]/80 disabled:opacity-40 flex items-center justify-center gap-2"
+                      >
+                        <Camera className="w-4 h-4" /> Continue to Face Capture
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {enrollStep === 'done' && (
+                <div className="text-center py-4">
+                  <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-green-700">Face Enrolled!</p>
+                  <p className="text-xs text-gray-500 mt-1">Student can now use auto check-in.</p>
+                  <button
+                    onClick={() => { setEnrollStep('select'); setEnrollStudentId(''); if (cameraOn) stopCamera(); }}
+                    className="mt-3 text-xs text-[#d4a843] underline"
+                  >
+                    Enroll another student
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* FLOW: NEW REGISTRATION */}
+          {flow === 'register' && (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-blue-600" /> New Student Registration
               </h3>
 
               {regStep === 'form' && (
@@ -521,14 +639,11 @@ export default function AttendanceTab() {
                     className="w-full px-3 py-2.5 rounded-lg border border-gray-200 text-sm outline-none focus:border-[#d4a843]" />
                   <button
                     onClick={() => {
-                      if (!regName || !regEmail || !regDepartment) {
-                        notify('error', 'Please fill all fields first.');
-                        return;
-                      }
+                      if (!regName || !regEmail || !regDepartment) { notify('error', 'Fill all fields first.'); return; }
                       setRegStep('capture');
                       if (!cameraOn) startCamera();
                     }}
-                    className="w-full py-2.5 bg-[#d4a843] text-[#1a4d2e] rounded-xl text-sm font-bold hover:bg-[#d4a843]/80 flex items-center justify-center gap-2"
+                    className="w-full py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 flex items-center justify-center gap-2"
                   >
                     <Camera className="w-4 h-4" /> Continue to Face Capture
                   </button>
@@ -539,27 +654,20 @@ export default function AttendanceTab() {
                 <div className="space-y-3">
                   <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
                     {regFaceImage && (
-                      <img src={regFaceImage} alt="Captured face" className="w-16 h-16 rounded-full object-cover border-2 border-green-400" />
+                      <img src={regFaceImage} alt="Face" className="w-16 h-16 rounded-full object-cover border-2 border-green-400" />
                     )}
                     <div className="text-sm">
-                      <p className="font-medium text-gray-800">{regName}</p>
+                      <p className="font-medium">{regName}</p>
                       <p className="text-xs text-gray-500">{regEmail} • {regDepartment}</p>
                     </div>
                   </div>
-                  <button
-                    onClick={handleRegister}
-                    disabled={processing}
+                  <button onClick={handleRegister} disabled={processing}
                     className="w-full py-2.5 bg-[#1a4d2e] text-white rounded-xl text-sm font-bold hover:bg-[#1a4d2e]/80 disabled:opacity-40 flex items-center justify-center gap-2"
                   >
                     {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-                    Complete Registration
+                    Complete Registration with Face
                   </button>
-                  <button
-                    onClick={() => setRegStep('form')}
-                    className="w-full py-2 text-xs text-gray-500 hover:text-gray-700 underline"
-                  >
-                    Back to form
-                  </button>
+                  <button onClick={() => setRegStep('form')} className="w-full py-2 text-xs text-gray-500 hover:text-gray-700 underline">Back</button>
                 </div>
               )}
             </div>
@@ -567,23 +675,19 @@ export default function AttendanceTab() {
         </div>
       </div>
 
-      {/* Registered Students */}
+      {/* Registered Students List */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="p-4 border-b border-gray-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Users className="w-5 h-5 text-[#1a4d2e]" />
-            <span className="font-semibold text-gray-800">Registered Students ({students.length})</span>
+            <span className="font-semibold text-gray-800">Registered Students</span>
+            <span className="text-xs bg-gray-100 px-2 py-0.5 rounded-full text-gray-600">{students.length}</span>
           </div>
-          <button onClick={fetchStudents} className="p-1.5 hover:bg-gray-100 rounded-lg">
-            <RefreshCw className="w-4 h-4 text-gray-500" />
-          </button>
+          <button onClick={fetchStudents} className="p-1.5 hover:bg-gray-100 rounded-lg"><RefreshCw className="w-4 h-4 text-gray-500" /></button>
         </div>
         <div className="max-h-[200px] overflow-y-auto">
           {students.length === 0 ? (
-            <div className="p-6 text-center text-gray-400">
-              <Users className="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p className="text-xs">No students registered yet</p>
-            </div>
+            <div className="p-6 text-center text-gray-400"><Users className="w-8 h-8 mx-auto mb-2 opacity-50" /><p className="text-xs">No registered students yet</p></div>
           ) : (
             students.map(s => (
               <div key={s.id} className="flex items-center justify-between px-4 py-2.5 border-b border-gray-50 hover:bg-gray-50/50">
@@ -591,20 +695,21 @@ export default function AttendanceTab() {
                   {s.faceImage ? (
                     <img src={s.faceImage} alt="" className="w-8 h-8 rounded-full object-cover" />
                   ) : (
-                    <div className="w-8 h-8 rounded-full bg-[#1a4d2e]/10 flex items-center justify-center text-xs font-bold text-[#1a4d2e]">
-                      {s.name.charAt(0)}
-                    </div>
+                    <div className="w-8 h-8 rounded-full bg-[#1a4d2e]/10 flex items-center justify-center text-xs font-bold text-[#1a4d2e]">{s.name.charAt(0)}</div>
                   )}
                   <div>
                     <p className="text-sm font-medium">{s.name}</p>
-                    <p className="text-[10px] text-gray-400">{s.department} {s.faceDescriptor ? '• Face enrolled' : ''}</p>
+                    <p className="text-[10px] text-gray-400">{s.department}</p>
                   </div>
                 </div>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full ${
-                  presentStudentIds.has(s.id) ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                }`}>
-                  {presentStudentIds.has(s.id) ? 'Present' : 'Absent'}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${s.faceDescriptor ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {s.faceDescriptor ? 'Face enrolled' : 'No face'}
+                  </span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${presentIds.has(s.id) ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+                    {presentIds.has(s.id) ? 'Present' : 'Absent'}
+                  </span>
+                </div>
               </div>
             ))
           )}
