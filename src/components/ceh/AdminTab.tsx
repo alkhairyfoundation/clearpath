@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, Users, Settings, BarChart3, Trash2, Plus, Upload, Save, Lock, Unlock, ImageIcon, Download, ChevronRight, Eye, BookOpen, Brain } from 'lucide-react';
+import { Shield, Users, Settings, BarChart3, Trash2, Plus, Upload, Save, Lock, Unlock, ImageIcon, Download, ChevronRight, Eye, BookOpen, Brain, ListChecks, Edit3 } from 'lucide-react';
 
 interface Student {
   id: string;
@@ -20,7 +20,7 @@ interface AdminTabProps {
 export default function AdminTab({ onStudentChange }: AdminTabProps) {
   const [authenticated, setAuthenticated] = useState(false);
   const [pin, setPin] = useState('');
-  const [activeSection, setActiveSection] = useState<'students' | 'settings' | 'stats' | 'knowledge'>('students');
+  const [activeSection, setActiveSection] = useState<'students' | 'settings' | 'stats' | 'knowledge' | 'quiz'>('students');
   const [students, setStudents] = useState<Student[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
@@ -47,6 +47,18 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
   const [newInfoContent, setNewInfoContent] = useState('');
   const [newInfoCategory, setNewInfoCategory] = useState('general');
   const [showAddInfo, setShowAddInfo] = useState(false);
+
+  // Quiz sections
+  const [quizSections, setQuizSections] = useState<any[]>([]);
+  const [showAddSection, setShowAddSection] = useState(false);
+  const [newSectionName, setNewSectionName] = useState('');
+  const [newSectionDesc, setNewSectionDesc] = useState('');
+  const [editingSection, setEditingSection] = useState<string | null>(null);
+  const [sectionQuestions, setSectionQuestions] = useState<{ question: string; options: string[]; correct: number; points: number }[]>([]);
+  const [expandedSection, setExpandedSection] = useState<string | null>(null);
+
+  // Temp question form state
+  const [qForm, setQForm] = useState({ question: '', opt1: '', opt2: '', opt3: '', opt4: '', correct: 0, points: 10 });
 
   // Health stats
   const [healthData, setHealthData] = useState<{ status: string; uptime: number; db: string; api: string; memoryUsage: string; students: number; attendance: number; version: string } | null>(null);
@@ -146,6 +158,89 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
     }
   };
 
+  const fetchQuizSections = useCallback(async () => {
+    try {
+      const res = await fetch('/api/quiz-sections');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) setQuizSections(data);
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  const addQuestionToSection = () => {
+    if (!qForm.question || !qForm.opt1 || !qForm.opt2) {
+      notify('error', 'Question and at least 2 options required.');
+      return;
+    }
+    const options = [qForm.opt1, qForm.opt2];
+    if (qForm.opt3) options.push(qForm.opt3);
+    if (qForm.opt4) options.push(qForm.opt4);
+    setSectionQuestions(prev => [...prev, {
+      question: qForm.question,
+      options,
+      correct: qForm.correct,
+      points: qForm.points || 10,
+    }]);
+    setQForm({ question: '', opt1: '', opt2: '', opt3: '', opt4: '', correct: 0, points: 10 });
+  };
+
+  const removeSectionQuestion = (idx: number) => {
+    setSectionQuestions(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleSaveSection = async () => {
+    if (!newSectionName) { notify('error', 'Section name required.'); return; }
+    if (sectionQuestions.length === 0) { notify('error', 'Add at least one question.'); return; }
+    setLoading(true);
+    try {
+      if (editingSection) {
+        await fetch('/api/quiz-sections', {
+          method: 'PUT',
+          headers: adminHeaders,
+          body: JSON.stringify({ id: editingSection, name: newSectionName, description: newSectionDesc, questions: sectionQuestions }),
+        });
+        notify('success', 'Section updated!');
+      } else {
+        await fetch('/api/quiz-sections', {
+          method: 'POST',
+          headers: adminHeaders,
+          body: JSON.stringify({ name: newSectionName, description: newSectionDesc, questions: sectionQuestions }),
+        });
+        notify('success', 'Section created!');
+      }
+      setShowAddSection(false); setEditingSection(null);
+      setNewSectionName(''); setNewSectionDesc(''); setSectionQuestions([]);
+      fetchQuizSections();
+    } catch { notify('error', 'Failed to save section.'); } finally { setLoading(false); }
+  };
+
+  const handleEditSection = (section: any) => {
+    setEditingSection(section.id);
+    setNewSectionName(section.name);
+    setNewSectionDesc(section.description || '');
+    setSectionQuestions(section.questions.map((q: any) => ({
+      question: q.question,
+      options: q.options,
+      correct: q.correct,
+      points: q.points || 10,
+    })));
+    setShowAddSection(true);
+  };
+
+  const handleDeleteSection = async (id: string) => {
+    if (!confirm('Delete this section and all its questions?')) return;
+    try {
+      await fetch('/api/quiz-sections', {
+        method: 'DELETE',
+        headers: adminHeaders,
+        body: JSON.stringify({ id }),
+      });
+      notify('success', 'Section deleted.');
+      fetchQuizSections();
+    } catch { notify('error', 'Failed to delete.'); }
+  };
+
   const fetchHealth = useCallback(async () => {
     try {
       const res = await fetch('/api/health');
@@ -163,6 +258,7 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
       fetchAttendance();
       fetchLeaderboard();
       fetchSchoolInfo();
+      fetchQuizSections();
       fetchHealth();
     };
     refreshAllRef.current();
@@ -350,6 +446,7 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
         {[
           { key: 'students', label: 'Students', icon: Users },
           { key: 'knowledge', label: 'AI Training', icon: Brain },
+          { key: 'quiz', label: 'Quiz Sections', icon: ListChecks },
           { key: 'settings', label: 'Settings', icon: Settings },
           { key: 'stats', label: 'Statistics', icon: BarChart3 },
         ].map(tab => (
@@ -622,6 +719,158 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* QUIZ SECTIONS MANAGEMENT */}
+      {activeSection === 'quiz' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ListChecks className="w-5 h-5 text-[#d4a843]" />
+                <h3 className="font-semibold text-gray-800">Quiz Sections</h3>
+                <span className="text-xs bg-gray-100 px-2 py-0.5 rounded-full text-gray-600">{quizSections.length}</span>
+              </div>
+              <button onClick={() => { setShowAddSection(!showAddSection); if (!showAddSection) { setEditingSection(null); setNewSectionName(''); setNewSectionDesc(''); setSectionQuestions([]); } }}
+                className="px-3 py-1.5 bg-[#1a4d2e] text-white rounded-lg text-xs font-medium hover:bg-[#1a4d2e]/80 flex items-center gap-1">
+                <Plus className="w-3 h-3" /> {showAddSection ? 'Cancel' : 'New Section'}
+              </button>
+            </div>
+
+            <AnimatePresence>
+              {showAddSection && (
+                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden border-b border-gray-100">
+                  <div className="p-4 space-y-3">
+                    <input type="text" placeholder="Section name (e.g. 'Network Security', 'Cryptography')"
+                      value={newSectionName} onChange={e => setNewSectionName(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-[#d4a843]" />
+                    <input type="text" placeholder="Description (optional)"
+                      value={newSectionDesc} onChange={e => setNewSectionDesc(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-[#d4a843]" />
+
+                    {/* Question form */}
+                    <div className="bg-gray-50 rounded-xl p-3 space-y-2">
+                      <p className="text-xs font-semibold text-gray-600">Add Question</p>
+                      <input type="text" placeholder="Question text"
+                        value={qForm.question} onChange={e => setQForm(f => ({ ...f, question: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none" />
+                      <div className="grid grid-cols-2 gap-2">
+                        <input type="text" placeholder="Option A" value={qForm.opt1}
+                          onChange={e => setQForm(f => ({ ...f, opt1: e.target.value }))}
+                          className="px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none" />
+                        <input type="text" placeholder="Option B" value={qForm.opt2}
+                          onChange={e => setQForm(f => ({ ...f, opt2: e.target.value }))}
+                          className="px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none" />
+                        <input type="text" placeholder="Option C (optional)" value={qForm.opt3}
+                          onChange={e => setQForm(f => ({ ...f, opt3: e.target.value }))}
+                          className="px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none" />
+                        <input type="text" placeholder="Option D (optional)" value={qForm.opt4}
+                          onChange={e => setQForm(f => ({ ...f, opt4: e.target.value }))}
+                          className="px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none" />
+                      </div>
+                      <div className="flex gap-2">
+                        <select value={qForm.correct} onChange={e => setQForm(f => ({ ...f, correct: parseInt(e.target.value) }))}
+                          className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none">
+                          <option value={0}>A is correct</option>
+                          <option value={1}>B is correct</option>
+                          <option value={2}>C is correct</option>
+                          <option value={3}>D is correct</option>
+                        </select>
+                        <input type="number" placeholder="Points" value={qForm.points}
+                          onChange={e => setQForm(f => ({ ...f, points: parseInt(e.target.value) || 10 }))}
+                          className="w-20 px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none" min={1} />
+                        <button onClick={addQuestionToSection}
+                          className="px-4 py-2 bg-[#d4a843] text-[#1a4d2e] rounded-lg text-sm font-semibold hover:bg-[#d4a843]/80">
+                          + Add
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Questions list */}
+                    {sectionQuestions.length > 0 && (
+                      <div className="space-y-1 max-h-48 overflow-y-auto">
+                        <p className="text-xs font-semibold text-gray-600">{sectionQuestions.length} question(s)</p>
+                        {sectionQuestions.map((q, i) => (
+                          <div key={i} className="flex items-center justify-between p-2 bg-white rounded-lg border border-gray-100">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium truncate">{i + 1}. {q.question}</p>
+                              <p className="text-[10px] text-gray-400">Correct: {q.options[q.correct]} | {q.points}pts</p>
+                            </div>
+                            <button onClick={() => removeSectionQuestion(i)} className="p-1 text-red-400 hover:bg-red-50 rounded ml-2 flex-shrink-0">
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <button onClick={handleSaveSection} disabled={loading || !newSectionName || sectionQuestions.length === 0}
+                      className="w-full py-2 bg-[#1a4d2e] text-white rounded-lg text-sm font-semibold disabled:opacity-40">
+                      {loading ? 'Saving...' : editingSection ? 'Update Section' : 'Create Section'}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Section list */}
+            <div className="divide-y divide-gray-50 max-h-[500px] overflow-y-auto">
+              {quizSections.length === 0 ? (
+                <div className="p-8 text-center text-gray-400">
+                  <ListChecks className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No quiz sections yet</p>
+                  <p className="text-xs mt-1">Create custom quizzes for battle mode!</p>
+                </div>
+              ) : (
+                quizSections.map(sec => (
+                  <div key={sec.id}>
+                    <div className="p-4 hover:bg-gray-50/50 cursor-pointer flex items-center justify-between"
+                      onClick={() => setExpandedSection(expandedSection === sec.id ? null : sec.id)}>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium">{sec.name}</p>
+                          <span className="text-[10px] bg-gray-100 px-2 py-0.5 rounded-full">{sec.questions?.length || 0} Qs</span>
+                        </div>
+                        {sec.description && <p className="text-xs text-gray-400 mt-0.5">{sec.description}</p>}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button onClick={(e) => { e.stopPropagation(); handleEditSection(sec); }}
+                          className="p-1.5 text-gray-400 hover:bg-gray-100 rounded">
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); handleDeleteSection(sec.id); }}
+                          className="p-1.5 text-red-400 hover:bg-red-50 rounded">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                        <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform ${expandedSection === sec.id ? 'rotate-90' : ''}`} />
+                      </div>
+                    </div>
+                    <AnimatePresence>
+                      {expandedSection === sec.id && sec.questions?.length > 0 && (
+                        <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} className="overflow-hidden">
+                          <div className="px-4 pb-3 space-y-1">
+                            {sec.questions.map((q: any, i: number) => (
+                              <div key={q.id} className="p-2 bg-gray-50 rounded-lg text-xs">
+                                <p className="font-medium"><span className="text-gray-400">Q{i + 1}.</span> {q.question}</p>
+                                <div className="flex gap-2 mt-1 text-[10px] text-gray-500">
+                                  {q.options.map((o: string, oi: number) => (
+                                    <span key={oi} className={`px-1.5 py-0.5 rounded ${oi === q.correct ? 'bg-green-100 text-green-700' : 'bg-gray-100'}`}>
+                                      {String.fromCharCode(65 + oi)}. {o}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 ))
               )}

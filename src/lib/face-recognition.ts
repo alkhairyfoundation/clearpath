@@ -8,6 +8,7 @@ export async function loadFaceModels(): Promise<boolean> {
   try {
     const faceApiModule = await import('@vladmandic/face-api');
     faceapi = faceApiModule;
+    // Set SSD Mobilenet v1 confidence threshold for higher accuracy
     await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
     await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
     await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
@@ -19,36 +20,80 @@ export async function loadFaceModels(): Promise<boolean> {
   }
 }
 
+// Minimum confidence threshold for face detection
+const MIN_CONFIDENCE = 0.6;
+
 export async function detectFace(
   input: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement
 ): Promise<{ detection: any; descriptor: number[] } | null> {
   if (!faceapi) return null;
   try {
-    const result = await faceapi
-      .detectSingleFace(input)
+    // Detect all faces and pick the best (highest confidence)
+    const results = await faceapi
+      .detectAllFaces(input, new faceapi.SsdMobilenetv1Options({ minConfidence: MIN_CONFIDENCE }))
       .withFaceLandmarks()
-      .withFaceDescriptor();
-    if (!result) return null;
+      .withFaceDescriptors();
+
+    if (!results || results.length === 0) return null;
+
+    // Pick the face with highest detection score
+    const best = results.reduce((a: any, b: any) =>
+      a.detection.score > b.detection.score ? a : b
+    );
+
+    // Quality check: ensure the face box is reasonably sized
+    const box = best.detection.box;
+    const minSize = 80;
+    if (box.width < minSize || box.height < minSize) return null;
+
     return {
-      detection: result.detection,
-      descriptor: Array.from(result.descriptor),
+      detection: best.detection,
+      descriptor: Array.from(best.descriptor),
     };
   } catch {
     return null;
   }
 }
 
+// Best face descriptor from multiple capture attempts
+export async function getBestFaceDescriptor(
+  videoElement: HTMLVideoElement,
+  attempts: number = 5
+): Promise<number[] | null> {
+  const descriptors: { descriptor: number[]; score: number }[] = [];
+
+  for (let i = 0; i < attempts; i++) {
+    const result = await detectFace(videoElement);
+    if (result) {
+      descriptors.push({
+        descriptor: result.descriptor,
+        score: result.detection.score,
+      });
+    }
+    // Brief pause between attempts
+    if (i < attempts - 1) {
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+
+  if (descriptors.length === 0) return null;
+
+  // Return descriptor from the highest-confidence detection
+  descriptors.sort((a, b) => b.score - a.score);
+  return descriptors[0].descriptor;
+}
+
+// Quick single descriptor capture (for backward compatibility)
 export async function getFaceDescriptor(
   videoElement: HTMLVideoElement
 ): Promise<number[] | null> {
-  const result = await detectFace(videoElement);
-  return result?.descriptor || null;
+  return getBestFaceDescriptor(videoElement, 1);
 }
 
 export function compareDescriptors(
   desc1: number[],
   desc2: number[],
-  threshold: number = 0.5
+  threshold: number = 0.4
 ): { match: boolean; distance: number } {
   if (desc1.length !== desc2.length) {
     return { match: false, distance: Infinity };
@@ -80,7 +125,8 @@ export function findBestMatch(
 
   return {
     ...bestMatch,
-    match: bestMatch.distance < 0.5,
+    // Stricter threshold for reliable matching (0.4 vs previous 0.5)
+    match: bestMatch.distance < 0.4,
   };
 }
 

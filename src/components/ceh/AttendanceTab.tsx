@@ -7,7 +7,7 @@ import {
   RefreshCw, UserPlus, ScanFace, Loader2, Smile, Fingerprint,
   User
 } from 'lucide-react';
-import { loadFaceModels, getFaceDescriptor, findBestMatch, captureFrame } from '@/lib/face-recognition';
+import { loadFaceModels, getFaceDescriptor, getBestFaceDescriptor, findBestMatch, captureFrame } from '@/lib/face-recognition';
 
 interface Student {
   id: string;
@@ -159,17 +159,18 @@ export default function AttendanceTab() {
     scanIntervalRef.current = setInterval(async () => {
       if (!videoRef.current || !streamRef.current) return;
       try {
-        const descriptor = await getFaceDescriptor(videoRef.current);
+        // Use multiple capture attempts for more reliable recognition
+        const descriptor = await getBestFaceDescriptor(videoRef.current, 3);
         if (descriptor) {
           const match = findBestMatch(
             descriptor,
             enrolled.map(s => ({ studentId: s.id, descriptor: s.faceDescriptor as number[] }))
           );
           if (match.match) {
+            clearInterval(scanIntervalRef.current!);
+            scanIntervalRef.current = undefined;
             const student = students.find(s => s.id === match.studentId);
             if (student) {
-              clearInterval(scanIntervalRef.current!);
-              scanIntervalRef.current = undefined;
               setRecognizedStudent(student);
               setRecognizing(false);
               setRecognitionStatus('found');
@@ -178,7 +179,7 @@ export default function AttendanceTab() {
           }
         }
       } catch {}
-    }, 1500);
+    }, 2000); // Slightly longer interval to allow for 3 capture attempts
   };
 
   const markAttendance = async (studentId: string) => {
@@ -215,7 +216,8 @@ export default function AttendanceTab() {
     if (!videoRef.current || !modelsLoaded) return;
     setProcessing(true);
     try {
-      const descriptor = await getFaceDescriptor(videoRef.current);
+      // Use multiple attempts for high-quality enrollment
+      const descriptor = await getBestFaceDescriptor(videoRef.current, 5);
       if (descriptor) {
         const res = await fetch('/api/students/enroll-face', {
           method: 'POST',
@@ -248,7 +250,8 @@ export default function AttendanceTab() {
     if (!videoRef.current || !modelsLoaded) return;
     setProcessing(true);
     try {
-      const descriptor = await getFaceDescriptor(videoRef.current);
+      // Use multiple attempts for high-quality enrollment
+      const descriptor = await getBestFaceDescriptor(videoRef.current, 5);
       if (descriptor) {
         setRegFaceDescriptor(descriptor);
         setRegFaceImage(captureFrame(videoRef.current));

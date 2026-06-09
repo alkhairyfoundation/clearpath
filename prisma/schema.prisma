@@ -9,13 +9,13 @@ datasource db {
 }
 
 model Student {
-  id              String      @id @default(cuid())
+  id              String            @id @default(cuid())
   name            String
-  email           String      @unique
+  email           String            @unique
   department      String
-  faceImage       String?     @db.Text
+  faceImage       String?           @db.Text
   faceDescriptor  Json?
-  registeredAt    DateTime    @default(now())
+  registeredAt    DateTime          @default(now())
   attendance      Attendance[]
 }
 
@@ -26,6 +26,26 @@ model Attendance {
   confidence Float?
   timestamp  DateTime @default(now())
   method     String   @default("manual")
+}
+
+model QuizSection {
+  id          String         @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  questions   QuizQuestion[]
+}
+
+model QuizQuestion {
+  id        String      @id @default(cuid())
+  sectionId String
+  section   QuizSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  question  String
+  options   Json        // string[]
+  correct   Int         // index into options (0-3)
+  points    Int         @default(10)
+  createdAt DateTime    @default(now())
 }
 
 model QuizSession {

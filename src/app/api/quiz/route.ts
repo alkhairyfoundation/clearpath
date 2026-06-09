@@ -15,11 +15,34 @@ export async function GET() {
   }
 }
 
-// POST submit quiz session
+// POST submit quiz session(s) — single or batch (battle mode)
 export async function POST(req: NextRequest) {
   try {
-    const { studentName, studentEmail, score, total, category } = await req.json();
-    
+    const body = await req.json();
+
+    // Batch submission (battle mode): { participants: [{ studentName, score, total, category }] }
+    if (body.participants && Array.isArray(body.participants)) {
+      if (body.participants.length === 0) {
+        return NextResponse.json({ error: 'Participants array is empty' }, { status: 400 });
+      }
+      const created = await db.$transaction(
+        body.participants.map((p: any) =>
+          db.quizSession.create({
+            data: {
+              studentName: p.studentName,
+              studentEmail: p.studentEmail || null,
+              score: p.score,
+              total: p.total,
+              category: p.category || null,
+            },
+          })
+        )
+      );
+      return NextResponse.json(created, { status: 201 });
+    }
+
+    // Single submission
+    const { studentName, studentEmail, score, total, category } = body;
     if (!studentName || score === undefined || !total) {
       return NextResponse.json({ error: 'Student name, score, and total are required' }, { status: 400 });
     }
@@ -27,7 +50,7 @@ export async function POST(req: NextRequest) {
     const session = await db.quizSession.create({
       data: { studentName, studentEmail: studentEmail || null, score, total, category: category || null },
     });
-    
+
     return NextResponse.json(session, { status: 201 });
   } catch (error: any) {
     console.error('Quiz POST error:', error);
