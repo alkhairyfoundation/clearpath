@@ -66,7 +66,7 @@ export default function AssistantTab({ avatarUrl, autoSpeak }: AssistantTabProps
   useEffect(() => { schoolContextRef.current = schoolContext; }, [schoolContext]);
   useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
 
-  // Fetch school context for AI
+  // Fetch school context for AI (refreshes periodically)
   useEffect(() => {
     const fetchContext = async () => {
       try {
@@ -91,6 +91,8 @@ export default function AssistantTab({ avatarUrl, autoSpeak }: AssistantTabProps
       } catch { /* silent */ }
     };
     fetchContext();
+    const interval = setInterval(fetchContext, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const speakRef = useRef<(text: string, callback?: () => void) => void>(() => {});

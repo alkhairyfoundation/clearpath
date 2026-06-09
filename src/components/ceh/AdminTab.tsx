@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Shield, Users, Settings, BarChart3, Trash2, Plus, Upload, Save, Lock, Unlock, ImageIcon, Download, ChevronRight, Eye } from 'lucide-react';
+import { Shield, Users, Settings, BarChart3, Trash2, Plus, Upload, Save, Lock, Unlock, ImageIcon, Download, ChevronRight, Eye, BookOpen, Brain } from 'lucide-react';
 
 interface Student {
   id: string;
@@ -20,7 +20,7 @@ interface AdminTabProps {
 export default function AdminTab({ onStudentChange }: AdminTabProps) {
   const [authenticated, setAuthenticated] = useState(false);
   const [pin, setPin] = useState('');
-  const [activeSection, setActiveSection] = useState<'students' | 'settings' | 'stats'>('students');
+  const [activeSection, setActiveSection] = useState<'students' | 'settings' | 'stats' | 'knowledge'>('students');
   const [students, setStudents] = useState<Student[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
@@ -40,6 +40,13 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
   const [oldPin, setOldPin] = useState('');
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
+
+  // School Knowledge (AI Training)
+  const [schoolInfo, setSchoolInfo] = useState<{ id: string; category: string; title: string; content: string }[]>([]);
+  const [newInfoTitle, setNewInfoTitle] = useState('');
+  const [newInfoContent, setNewInfoContent] = useState('');
+  const [newInfoCategory, setNewInfoCategory] = useState('general');
+  const [showAddInfo, setShowAddInfo] = useState(false);
 
   // Health stats
   const [healthData, setHealthData] = useState<{ status: string; uptime: number; db: string; api: string; memoryUsage: string; students: number; attendance: number; version: string } | null>(null);
@@ -88,6 +95,57 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
     } catch { /* silent */ }
   }, []);
 
+  const fetchSchoolInfo = useCallback(async () => {
+    try {
+      const res = await fetch('/api/school-info');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) setSchoolInfo(data);
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  const handleAddSchoolInfo = async () => {
+    if (!newInfoTitle || !newInfoContent) {
+      notify('error', 'Title and content are required.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch('/api/school-info', {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({ category: newInfoCategory, title: newInfoTitle, content: newInfoContent }),
+      });
+      if (res.ok) {
+        notify('success', 'Knowledge added! AI will use this in responses.');
+        setNewInfoTitle(''); setNewInfoContent(''); setNewInfoCategory('general');
+        setShowAddInfo(false);
+        fetchSchoolInfo();
+      } else {
+        notify('error', 'Failed to add.');
+      }
+    } catch {
+      notify('error', 'Failed to add knowledge.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteSchoolInfo = async (id: string) => {
+    try {
+      await fetch('/api/school-info', {
+        method: 'DELETE',
+        headers: adminHeaders,
+        body: JSON.stringify({ id }),
+      });
+      notify('success', 'Knowledge removed.');
+      fetchSchoolInfo();
+    } catch {
+      notify('error', 'Failed to delete.');
+    }
+  };
+
   const fetchHealth = useCallback(async () => {
     try {
       const res = await fetch('/api/health');
@@ -104,6 +162,7 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
       fetchSettings();
       fetchAttendance();
       fetchLeaderboard();
+      fetchSchoolInfo();
       fetchHealth();
     };
     refreshAllRef.current();
@@ -290,6 +349,7 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
       <div className="flex gap-2 overflow-x-auto pb-2">
         {[
           { key: 'students', label: 'Students', icon: Users },
+          { key: 'knowledge', label: 'AI Training', icon: Brain },
           { key: 'settings', label: 'Settings', icon: Settings },
           { key: 'stats', label: 'Statistics', icon: BarChart3 },
         ].map(tab => (
@@ -486,6 +546,87 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
               </motion.div>
             )}
           </AnimatePresence>
+        </div>
+      )}
+
+      {/* KNOWLEDGE SECTION (AI Training) */}
+      {activeSection === 'knowledge' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Brain className="w-5 h-5 text-[#d4a843]" />
+                <h3 className="font-semibold text-gray-800">AI Training — School Knowledge Base</h3>
+              </div>
+              <button
+                onClick={() => setShowAddInfo(!showAddInfo)}
+                className="px-3 py-1.5 bg-[#1a4d2e] text-white rounded-lg text-xs font-medium hover:bg-[#1a4d2e]/80 flex items-center gap-1"
+              >
+                <Plus className="w-3 h-3" /> Add Knowledge
+              </button>
+            </div>
+
+            <AnimatePresence>
+              {showAddInfo && (
+                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden border-b border-gray-100">
+                  <div className="p-4 space-y-3">
+                    <select value={newInfoCategory} onChange={e => setNewInfoCategory(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none">
+                      <option value="general">General</option>
+                      <option value="programs">Programs & Courses</option>
+                      <option value="history">School History</option>
+                      <option value="staff">Staff & Faculty</option>
+                      <option value="events">Events & Activities</option>
+                      <option value="policies">Policies</option>
+                    </select>
+                    <input type="text" placeholder="Title (e.g. 'School Mission', 'Computer Science Program')"
+                      value={newInfoTitle} onChange={e => setNewInfoTitle(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-[#d4a843]" />
+                    <textarea placeholder="Content — what should the AI know about this topic? Be detailed."
+                      value={newInfoContent} onChange={e => setNewInfoContent(e.target.value)} rows={4}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-[#d4a843] resize-none" />
+                    <button onClick={handleAddSchoolInfo} disabled={loading}
+                      className="w-full py-2 bg-[#d4a843] text-[#1a4d2e] rounded-lg text-sm font-semibold disabled:opacity-40">
+                      {loading ? 'Saving...' : 'Save to AI Knowledge Base'}
+                    </button>
+                    <p className="text-[10px] text-gray-400 text-center">
+                      The AI will use this information when answering questions about the school.
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div className="divide-y divide-gray-50 max-h-[500px] overflow-y-auto">
+              {schoolInfo.length === 0 ? (
+                <div className="p-8 text-center text-gray-400">
+                  <BookOpen className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No knowledge entries yet</p>
+                  <p className="text-xs mt-1">Add information about your school to train the AI assistant.</p>
+                </div>
+              ) : (
+                schoolInfo.map(item => (
+                  <div key={item.id} className="p-4 hover:bg-gray-50/50">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#d4a843]/10 text-[#d4a843] uppercase font-medium">
+                            {item.category}
+                          </span>
+                        </div>
+                        <p className="text-sm font-medium text-gray-800">{item.title}</p>
+                        <p className="text-xs text-gray-500 mt-1 line-clamp-2">{item.content}</p>
+                      </div>
+                      <button onClick={() => handleDeleteSchoolInfo(item.id)}
+                        className="p-1 text-red-400 hover:bg-red-50 rounded flex-shrink-0">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       )}
 

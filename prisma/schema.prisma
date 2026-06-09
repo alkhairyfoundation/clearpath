@@ -43,3 +43,11 @@ model AppSetting {
   key   String @unique
   value String  @db.Text
 }
+
+model SchoolInfo {
+  id        String   @id @default(cuid())
+  category  String   @default("general")
+  title     String
+  content   String   @db.Text
+  updatedAt DateTime @default(now()) @updatedAt
+}

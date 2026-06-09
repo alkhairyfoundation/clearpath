@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createChatCompletion } from '@/lib/openrouter';
+import { db } from '@/lib/db';
 
 const BASE_SYSTEM_PROMPT = `You are CEH AI, the official AI assistant for ClearPath Edu Hub's End of Year / Graduation Ceremony. You are knowledgeable, friendly, and professional.
 
@@ -21,51 +22,71 @@ You help guests and students with:
 - Fun facts and conversation
 - ClearPath Edu Hub programs
 
-When asked about specific students or attendance data, use the school context provided below.
-Be enthusiastic about the graduation ceremony! Keep responses concise but informative. Use warm, celebratory language appropriate for a graduation event.`;
+Use the school context provided below whenever available. Be enthusiastic about the graduation ceremony! Keep responses concise but informative. Use warm, celebratory language appropriate for a graduation event.`;
 
-function buildSystemPrompt(schoolContext?: {
+async function buildFullSystemPrompt(schoolContext?: {
   students?: any[];
   settings?: Record<string, string>;
   attendanceCount?: number;
   leaderboard?: any[];
 }) {
-  if (!schoolContext) return BASE_SYSTEM_PROMPT;
+  let prompt = BASE_SYSTEM_PROMPT;
 
-  let contextBlock = '\n\n--- CURRENT SCHOOL CONTEXT ---\n';
+  // Add school knowledge base (admin-trained info)
+  try {
+    const schoolInfo = await db.schoolInfo.findMany();
+    if (schoolInfo.length > 0) {
+      prompt += '\n\n--- SCHOOL KNOWLEDGE BASE (Admin-provided info) ---\n';
+      const grouped: Record<string, typeof schoolInfo> = {};
+      for (const item of schoolInfo) {
+        if (!grouped[item.category]) grouped[item.category] = [];
+        grouped[item.category].push(item);
+      }
+      for (const [category, items] of Object.entries(grouped)) {
+        prompt += `\n[${category.toUpperCase()}]\n`;
+        for (const item of items) {
+          prompt += `${item.title}: ${item.content}\n`;
+        }
+      }
+      prompt += '\n--- END SCHOOL KNOWLEDGE BASE ---\n';
+    }
+  } catch {}
 
-  if (schoolContext.students?.length) {
-    contextBlock += `\nRegistered Students (${schoolContext.students.length} total):\n`;
-    schoolContext.students.slice(0, 50).forEach(s => {
-      contextBlock += `- ${s.name} (${s.department}, ${s.email})\n`;
-    });
-  }
+  // Add dynamic school context (students, attendance, etc.)
+  if (schoolContext) {
+    prompt += '\n\n--- CURRENT SCHOOL DATA ---\n';
 
-  if (schoolContext.settings) {
-    const { avatarUrl, adminPin, ...otherSettings } = schoolContext.settings;
-    if (Object.keys(otherSettings).length > 0) {
-      contextBlock += `\nSchool Settings:\n`;
-      Object.entries(otherSettings).forEach(([k, v]) => {
-        contextBlock += `- ${k}: ${v}\n`;
+    if (schoolContext.students?.length) {
+      prompt += `\nRegistered Students (${schoolContext.students.length}):\n`;
+      schoolContext.students.slice(0, 50).forEach((s: any) => {
+        prompt += `- ${s.name} (${s.department}, ${s.email})\n`;
       });
     }
+
+    if (schoolContext.settings) {
+      const { avatarUrl, adminPin, ...rest } = schoolContext.settings;
+      if (Object.keys(rest).length > 0) {
+        prompt += `\nSettings:\n`;
+        Object.entries(rest).forEach(([k, v]) => { prompt += `- ${k}: ${v}\n`; });
+      }
+    }
+
+    if (schoolContext.attendanceCount !== undefined) {
+      prompt += `\nTotal Attendance Records: ${schoolContext.attendanceCount}\n`;
+    }
+
+    if (schoolContext.leaderboard?.length) {
+      prompt += `\nTop Quiz Performers:\n`;
+      schoolContext.leaderboard.slice(0, 10).forEach((entry: any, i: number) => {
+        prompt += `- #${i + 1}: ${entry.studentName} - ${entry.percentage}% (${entry.score}/${entry.total})\n`;
+      });
+    }
+
+    prompt += '\n--- END SCHOOL DATA ---\n';
   }
 
-  if (schoolContext.attendanceCount !== undefined) {
-    contextBlock += `\nTotal Attendance Records: ${schoolContext.attendanceCount}\n`;
-  }
-
-  if (schoolContext.leaderboard?.length) {
-    contextBlock += `\nTop Quiz Performers:\n`;
-    schoolContext.leaderboard.slice(0, 10).forEach((entry, i) => {
-      contextBlock += `- #${i + 1}: ${entry.studentName} - ${entry.percentage}% (${entry.score}/${entry.total})\n`;
-    });
-  }
-
-  contextBlock += '\n--- END SCHOOL CONTEXT ---\n';
-  contextBlock += '\nUse the above context when answering questions about students, attendance, or school data. If asked about something not in the context, say you don\'t have that information available.';
-
-  return BASE_SYSTEM_PROMPT + contextBlock;
+  prompt += '\nAlways use the above context when answering. If asked about something not in the context, say you don\'t have that information.';
+  return prompt;
 }
 
 export async function POST(req: NextRequest) {
@@ -76,7 +97,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 });
     }
 
-    const systemPrompt = buildSystemPrompt(schoolContext);
+    const systemPrompt = await buildFullSystemPrompt(schoolContext);
 
     const messages = [
       { role: 'system' as const, content: systemPrompt },
