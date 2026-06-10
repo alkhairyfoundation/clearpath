@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Camera, CameraOff, UserCheck, Users, CheckCircle, AlertCircle,
   RefreshCw, UserPlus, ScanFace, Loader2, Smile, Fingerprint,
-  User
+  User, RotateCcw
 } from 'lucide-react';
 import { loadFaceModels, getFaceDescriptor, getBestFaceDescriptor, findBestMatch, captureFrame } from '@/lib/face-recognition';
 
@@ -33,6 +33,7 @@ export default function AttendanceTab() {
   const [students, setStudents] = useState<Student[]>([]);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [cameraOn, setCameraOn] = useState(false);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [loadingModels, setLoadingModels] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -129,7 +130,7 @@ export default function AttendanceTab() {
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: 640, height: 480 },
+        video: { facingMode, width: 640, height: 480 },
       });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -384,14 +385,25 @@ export default function AttendanceTab() {
               <Camera className="w-5 h-5" />
               <span className="font-semibold">Camera</span>
             </div>
-            <button
-              onClick={cameraOn ? stopCamera : startCamera}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                cameraOn ? 'bg-red-500 hover:bg-red-600' : 'bg-white/20 hover:bg-white/30'
-              }`}
-            >
-              {cameraOn ? <><CameraOff className="w-3 h-3 inline mr-1" />Stop</> : <><Camera className="w-3 h-3 inline mr-1" />Start</>}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={cameraOn ? stopCamera : startCamera}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  cameraOn ? 'bg-red-500 hover:bg-red-600' : 'bg-white/20 hover:bg-white/30'
+                }`}
+              >
+                {cameraOn ? <><CameraOff className="w-3 h-3 inline mr-1" />Stop</> : <><Camera className="w-3 h-3 inline mr-1" />Start</>}
+              </button>
+              {cameraOn && (
+                <button
+                  onClick={() => setFacingMode(facingMode === 'user' ? 'environment' : 'user')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/20 hover:bg-white/30 transition-all"
+                  title={facingMode === 'user' ? 'Switch to back camera' : 'Switch to front camera'}
+                >
+                  {facingMode === 'user' ? <><Camera className="w-3 h-3 inline mr-1" />Back</> : <><RotateCcw className="w-3 h-3 inline mr-1" />Front</>}
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="aspect-video bg-gray-900 relative">
