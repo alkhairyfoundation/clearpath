@@ -143,6 +143,16 @@ export default function AttendanceTab() {
     }
   };
 
+  const switchCamera = async () => {
+    const newFacingMode = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(newFacingMode);
+    if (cameraOn) {
+      stopCamera();
+      await new Promise(r => setTimeout(r, 200));
+      startCamera();
+    }
+  };
+
   // ----- FACE CHECK-IN -----
   const startFaceScan = async () => {
     if (!videoRef.current || !modelsLoaded) return;
@@ -396,7 +406,7 @@ export default function AttendanceTab() {
               </button>
               {cameraOn && (
                 <button
-                  onClick={() => setFacingMode(facingMode === 'user' ? 'environment' : 'user')}
+                  onClick={switchCamera}
                   className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/20 hover:bg-white/30 transition-all"
                   title={facingMode === 'user' ? 'Switch to back camera' : 'Switch to front camera'}
                 >
