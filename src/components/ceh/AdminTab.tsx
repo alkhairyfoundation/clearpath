@@ -32,6 +32,7 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newStudent, setNewStudent] = useState({ name: '', email: '', department: '', faceImage: '' });
   const [newStudentFaceFile, setNewStudentFaceFile] = useState<string | null>(null);
+  const [editingStudent, setEditingStudent] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const faceFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -47,6 +48,7 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
   const [newInfoContent, setNewInfoContent] = useState('');
   const [newInfoCategory, setNewInfoCategory] = useState('general');
   const [showAddInfo, setShowAddInfo] = useState(false);
+  const [editingInfo, setEditingInfo] = useState<string | null>(null);
 
   // Quiz sections
   const [quizSections, setQuizSections] = useState<any[]>([]);
@@ -124,24 +126,45 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
     }
     setLoading(true);
     try {
-      const res = await fetch('/api/school-info', {
-        method: 'POST',
-        headers: adminHeaders,
-        body: JSON.stringify({ category: newInfoCategory, title: newInfoTitle, content: newInfoContent }),
-      });
-      if (res.ok) {
-        notify('success', 'Knowledge added! AI will use this in responses.');
-        setNewInfoTitle(''); setNewInfoContent(''); setNewInfoCategory('general');
-        setShowAddInfo(false);
-        fetchSchoolInfo();
+      if (editingInfo) {
+        const res = await fetch('/api/school-info', {
+          method: 'PUT',
+          headers: adminHeaders,
+          body: JSON.stringify({ id: editingInfo, category: newInfoCategory, title: newInfoTitle, content: newInfoContent }),
+        });
+        if (res.ok) {
+          notify('success', 'Knowledge updated!');
+        } else {
+          notify('error', 'Failed to update.');
+        }
       } else {
-        notify('error', 'Failed to add.');
+        const res = await fetch('/api/school-info', {
+          method: 'POST',
+          headers: adminHeaders,
+          body: JSON.stringify({ category: newInfoCategory, title: newInfoTitle, content: newInfoContent }),
+        });
+        if (res.ok) {
+          notify('success', 'Knowledge added! AI will use this in responses.');
+        } else {
+          notify('error', 'Failed to add.');
+        }
       }
+      setNewInfoTitle(''); setNewInfoContent(''); setNewInfoCategory('general');
+      setShowAddInfo(false); setEditingInfo(null);
+      fetchSchoolInfo();
     } catch {
-      notify('error', 'Failed to add knowledge.');
+      notify('error', 'Failed to save knowledge.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEditSchoolInfo = (item: { id: string; category: string; title: string; content: string }) => {
+    setEditingInfo(item.id);
+    setNewInfoTitle(item.title);
+    setNewInfoContent(item.content);
+    setNewInfoCategory(item.category);
+    setShowAddInfo(true);
   };
 
   const handleDeleteSchoolInfo = async (id: string) => {
@@ -282,27 +305,50 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
     try {
       const body: any = { name: newStudent.name, email: newStudent.email, department: newStudent.department };
       if (newStudentFaceFile) body.faceImage = newStudentFaceFile;
-      const res = await fetch('/api/students', {
-        method: 'POST',
-        headers: adminHeaders,
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
-        notify('success', `${newStudent.name} registered successfully!`);
-        setNewStudent({ name: '', email: '', department: '', faceImage: '' });
-        setNewStudentFaceFile(null);
-        setShowAddForm(false);
-        fetchStudents();
-        onStudentChange();
+
+      if (editingStudent) {
+        body.id = editingStudent;
+        const res = await fetch('/api/students', {
+          method: 'PUT',
+          headers: adminHeaders,
+          body: JSON.stringify(body),
+        });
+        if (res.ok) {
+          notify('success', `${newStudent.name} updated!`);
+        } else {
+          const data = await res.json();
+          notify('error', data.error || 'Failed to update.');
+        }
       } else {
-        const data = await res.json();
-        notify('error', data.error);
+        const res = await fetch('/api/students', {
+          method: 'POST',
+          headers: adminHeaders,
+          body: JSON.stringify(body),
+        });
+        if (res.ok) {
+          notify('success', `${newStudent.name} registered successfully!`);
+        } else {
+          const data = await res.json();
+          notify('error', data.error);
+        }
       }
+      setNewStudent({ name: '', email: '', department: '', faceImage: '' });
+      setNewStudentFaceFile(null);
+      setShowAddForm(false);
+      setEditingStudent(null);
+      fetchStudents();
+      onStudentChange();
     } catch {
-      notify('error', 'Failed to register student.');
+      notify('error', 'Failed to save student.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEditStudent = (student: Student) => {
+    setEditingStudent(student.id);
+    setNewStudent({ name: student.name, email: student.email, department: student.department, faceImage: student.faceImage || '' });
+    setShowAddForm(true);
   };
 
   const deleteStudent = async (id: string, name: string) => {
@@ -470,12 +516,12 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="p-4 border-b border-gray-100 flex items-center justify-between">
             <h3 className="font-semibold text-gray-800">Student Registry</h3>
-            <button
-              onClick={() => setShowAddForm(!showAddForm)}
-              className="px-3 py-1.5 bg-[#1a4d2e] text-white rounded-lg text-xs font-medium hover:bg-[#1a4d2e]/80 flex items-center gap-1"
-            >
-              <Plus className="w-3 h-3" /> Add Student
-            </button>
+              <button
+                onClick={() => { const opening = !showAddForm; setShowAddForm(opening); if (!opening) { setEditingStudent(null); setNewStudent({ name: '', email: '', department: '', faceImage: '' }); setNewStudentFaceFile(null); } }}
+                className="px-3 py-1.5 bg-[#1a4d2e] text-white rounded-lg text-xs font-medium hover:bg-[#1a4d2e]/80 flex items-center gap-1"
+              >
+                <Plus className="w-3 h-3" /> {editingStudent ? 'Cancel' : 'Add Student'}
+              </button>
           </div>
           
           <AnimatePresence>
@@ -500,7 +546,7 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
                     {newStudentFaceFile && <span className="text-xs text-green-600">Photo selected</span>}
                   </div>
                   <button onClick={addStudent} disabled={loading} className="py-2 bg-[#d4a843] text-[#1a4d2e] rounded-lg text-sm font-semibold disabled:opacity-40">
-                    {loading ? 'Saving...' : 'Register Student'}
+                    {loading ? 'Saving...' : editingStudent ? 'Update Student' : 'Register Student'}
                   </button>
                 </div>
               </motion.div>
@@ -529,9 +575,14 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
                       <p className="text-xs text-gray-400">{s.department} • {s.email}</p>
                     </div>
                   </div>
-                  <button onClick={() => deleteStudent(s.id, s.name)} className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg transition-all">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => handleEditStudent(s)} className="p-1.5 text-blue-400 hover:bg-blue-50 rounded-lg transition-all">
+                      <Edit3 className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => deleteStudent(s.id, s.name)} className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg transition-all">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               ))
             )}
@@ -656,10 +707,10 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
                 <h3 className="font-semibold text-gray-800">AI Training — School Knowledge Base</h3>
               </div>
               <button
-                onClick={() => setShowAddInfo(!showAddInfo)}
+                onClick={() => { const opening = !showAddInfo; setShowAddInfo(opening); if (!opening) { setEditingInfo(null); setNewInfoTitle(''); setNewInfoContent(''); setNewInfoCategory('general'); } }}
                 className="px-3 py-1.5 bg-[#1a4d2e] text-white rounded-lg text-xs font-medium hover:bg-[#1a4d2e]/80 flex items-center gap-1"
               >
-                <Plus className="w-3 h-3" /> Add Knowledge
+                <Plus className="w-3 h-3" /> {editingInfo ? 'Cancel' : 'Add Knowledge'}
               </button>
             </div>
 
@@ -684,7 +735,7 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
                       className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm outline-none focus:border-[#d4a843] resize-none" />
                     <button onClick={handleAddSchoolInfo} disabled={loading}
                       className="w-full py-2 bg-[#d4a843] text-[#1a4d2e] rounded-lg text-sm font-semibold disabled:opacity-40">
-                      {loading ? 'Saving...' : 'Save to AI Knowledge Base'}
+                      {loading ? 'Saving...' : editingInfo ? 'Update Knowledge Entry' : 'Save to AI Knowledge Base'}
                     </button>
                     <p className="text-[10px] text-gray-400 text-center">
                       The AI will use this information when answering questions about the school.
@@ -714,10 +765,16 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
                         <p className="text-sm font-medium text-gray-800">{item.title}</p>
                         <p className="text-xs text-gray-500 mt-1 line-clamp-2">{item.content}</p>
                       </div>
-                      <button onClick={() => handleDeleteSchoolInfo(item.id)}
-                        className="p-1 text-red-400 hover:bg-red-50 rounded flex-shrink-0">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button onClick={() => handleEditSchoolInfo(item)}
+                          className="p-1 text-blue-400 hover:bg-blue-50 rounded">
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => handleDeleteSchoolInfo(item.id)}
+                          className="p-1 text-red-400 hover:bg-red-50 rounded">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))

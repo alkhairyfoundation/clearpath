@@ -31,6 +31,26 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// PUT - update (admin only)
+export async function PUT(req: NextRequest) {
+  const { authorized, response } = await requireAdminAuth(req);
+  if (!authorized) return response;
+  try {
+    const { id, category, title, content } = await req.json();
+    if (!id || !title || !content) {
+      return NextResponse.json({ error: 'ID, title, and content are required' }, { status: 400 });
+    }
+    const info = await db.schoolInfo.update({
+      where: { id },
+      data: { category: category || 'general', title, content },
+    });
+    return NextResponse.json(info);
+  } catch (error: any) {
+    console.error('SchoolInfo PUT error:', error);
+    return NextResponse.json({ error: 'Failed to update school info' }, { status: 500 });
+  }
+}
+
 // DELETE (admin only)
 export async function DELETE(req: NextRequest) {
   const { authorized, response } = await requireAdminAuth(req);

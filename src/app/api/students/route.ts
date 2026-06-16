@@ -44,6 +44,34 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// PUT update student (admin only)
+export async function PUT(req: NextRequest) {
+  const { authorized, response } = await requireAdminAuth(req);
+  if (!authorized) return response;
+  try {
+    const { id, name, email, department, faceImage, faceDescriptor } = await req.json();
+    if (!id) {
+      return NextResponse.json({ error: 'Student ID is required' }, { status: 400 });
+    }
+
+    const data: any = {};
+    if (name !== undefined) data.name = name;
+    if (email !== undefined) data.email = email;
+    if (department !== undefined) data.department = department;
+    if (faceImage !== undefined) data.faceImage = faceImage;
+    if (faceDescriptor !== undefined) data.faceDescriptor = faceDescriptor;
+
+    const student = await db.student.update({ where: { id }, data });
+    return NextResponse.json(student);
+  } catch (error: any) {
+    if (error.code === 'P2002') {
+      return NextResponse.json({ error: 'Another student with this email already exists' }, { status: 409 });
+    }
+    console.error('Students PUT error:', error);
+    return NextResponse.json({ error: 'Failed to update student' }, { status: 500 });
+  }
+}
+
 // DELETE student (admin only)
 export async function DELETE(req: NextRequest) {
   const { authorized, response } = await requireAdminAuth(req);
