@@ -36,6 +36,7 @@ export default function AttendanceTab() {
   const [cameraOn, setCameraOn] = useState(false);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [modelsLoadFailed, setModelsLoadFailed] = useState(false);
   const [loadingModels, setLoadingModels] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'info'; msg: string } | null>(null);
@@ -77,6 +78,7 @@ export default function AttendanceTab() {
     setLoadingModels(true);
     const ok = await loadFaceModels();
     setModelsLoaded(ok);
+    setModelsLoadFailed(!ok);
     setLoadingModels(false);
     if (!ok) notify('error', 'Failed to load face recognition models.');
     return ok;
@@ -129,6 +131,7 @@ export default function AttendanceTab() {
       streamRef.current = null;
     }
     setCameraOn(false);
+    setModelsLoadFailed(false);
     setRecognizedStudent(null);
     setRecognizing(false);
     setRecognitionStatus('idle');
@@ -495,6 +498,21 @@ export default function AttendanceTab() {
             {loadingModels && cameraOn && (
               <div className="absolute top-2 left-2 bg-black/60 text-white text-xs px-3 py-1 rounded-full flex items-center gap-1">
                 <Loader2 className="w-3 h-3 animate-spin" /> Loading AI models...
+              </div>
+            )}
+            {modelsLoadFailed && cameraOn && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                <div className="bg-white rounded-xl p-5 mx-4 text-center max-w-xs">
+                  <AlertCircle className="w-8 h-8 text-red-500 mx-auto mb-2" />
+                  <p className="text-sm font-semibold text-gray-800 mb-1">Model Load Failed</p>
+                  <p className="text-xs text-gray-500 mb-3">Could not download AI models. Check your internet connection and try again.</p>
+                  <button
+                    onClick={() => { setModelsLoadFailed(false); setLoadingModels(true); loadModels(); }}
+                    className="px-4 py-2 bg-[#1a4d2e] text-white rounded-lg text-xs font-medium hover:bg-[#1a4d2e]/80 transition-colors"
+                  >
+                    <RefreshCw className="w-3 h-3 inline mr-1" /> Retry
+                  </button>
+                </div>
               </div>
             )}
           </div>

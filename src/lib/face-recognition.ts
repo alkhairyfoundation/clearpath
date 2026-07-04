@@ -1,23 +1,44 @@
-const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+const MODEL_URLS = [
+  'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/model/',
+  'https://unpkg.com/@vladmandic/face-api@1.7.15/model/',
+];
+const LOAD_TIMEOUT_MS = 30000;
 
 let faceapi: any = null;
 let modelsLoaded = false;
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
+async function loadModelsFromUrl(url: string): Promise<boolean> {
+  const faceApiModule = await import('@vladmandic/face-api');
+  faceapi = faceApiModule;
+  await withTimeout(faceapi.nets.ssdMobilenetv1.loadFromUri(url), LOAD_TIMEOUT_MS);
+  await withTimeout(faceapi.nets.faceLandmark68Net.loadFromUri(url), LOAD_TIMEOUT_MS);
+  await withTimeout(faceapi.nets.faceRecognitionNet.loadFromUri(url), LOAD_TIMEOUT_MS);
+  return true;
+}
+
 export async function loadFaceModels(): Promise<boolean> {
   if (modelsLoaded) return true;
-  try {
-    const faceApiModule = await import('@vladmandic/face-api');
-    faceapi = faceApiModule;
-    // Set SSD Mobilenet v1 confidence threshold for higher accuracy
-    await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
-    await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
-    await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
-    modelsLoaded = true;
-    return true;
-  } catch (err) {
-    console.error('Failed to load face models:', err);
-    return false;
+  for (const url of MODEL_URLS) {
+    try {
+      console.log(`[face-api] Loading models from: ${url}`);
+      const ok = await loadModelsFromUrl(url);
+      modelsLoaded = ok;
+      return ok;
+    } catch (err) {
+      console.warn(`[face-api] Failed to load from ${url}:`, err);
+    }
   }
+  console.error('[face-api] All CDN URLs failed');
+  return false;
 }
 
 // Minimum confidence threshold for face detection
