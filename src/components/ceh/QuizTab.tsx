@@ -7,6 +7,7 @@ import {
   Volume2, VolumeX, Crown, Medal, Award, Target, CheckCircle,
   XCircle, Users, Swords, Plus, Trash2, User, UserCheck
 } from 'lucide-react';
+import { speak, stopSpeaking, preloadVoices } from '@/lib/tts';
 import { quizQuestions, quizCategories, QuizQuestion } from '@/lib/quiz-data';
 
 type GamePhase =
@@ -54,7 +55,6 @@ export default function QuizTab() {
   const [removedOptions, setRemovedOptions] = useState<Set<number>>(new Set());
   const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const timerRunningRef = useRef(false);
-  const synthRef = useRef<SpeechSynthesis | null>(null);
 
   // Battle state
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -68,23 +68,11 @@ export default function QuizTab() {
   const leaderboardInitRef = useRef(false);
   const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      synthRef.current = window.speechSynthesis;
-    }
-    return () => { if (synthRef.current) synthRef.current.cancel(); };
-  }, []);
+  // Preload TTS voices on mount
+  useEffect(() => { preloadVoices(); }, []);
 
-  const speak = useCallback((text: string) => {
-    if (!synthRef.current || !voiceEnabled) return;
-    synthRef.current.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 0.95;
-    u.pitch = 1.0;
-    const voices = synthRef.current.getVoices();
-    const preferred = voices.find(v => v.name.includes('Samantha') || v.name.includes('Google US'));
-    if (preferred) u.voice = preferred;
-    synthRef.current.speak(u);
+  const speakIfEnabled = useCallback((text: string) => {
+    if (voiceEnabled) speak(text);
   }, [voiceEnabled]);
 
   // Fetch leaderboard
@@ -177,10 +165,10 @@ export default function QuizTab() {
     if (idx === questions[currentQ].correct) {
       setScore(prev => prev + 1);
       setStreak(prev => prev + 1);
-      speak('Correct!');
+      speakIfEnabled('Correct!');
     } else {
       setStreak(0);
-      speak('Incorrect!');
+      speakIfEnabled('Incorrect!');
     }
   };
 
@@ -199,7 +187,7 @@ export default function QuizTab() {
     };
     setParticipants(updated);
 
-    speak(isCorrect ? `${current.name}, Correct!` : `${current.name}, Incorrect!`);
+    speakIfEnabled(isCorrect ? `${current.name}, Correct!` : `${current.name}, Incorrect!`);
 
     advanceBattle(updated);
   };
@@ -214,7 +202,7 @@ export default function QuizTab() {
       setAnswered(true);
       timerRunningRef.current = false;
       if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = undefined; }
-      speak('All answered!');
+      speakIfEnabled('All answered!');
     }
   };
 
@@ -228,7 +216,7 @@ export default function QuizTab() {
       finished: true,
     };
     setParticipants(updated);
-    speak(`${current.name}, time's up!`);
+    speakIfEnabled(`${current.name}, time's up!`);
     advanceBattle(updated);
   };
 
@@ -271,9 +259,9 @@ export default function QuizTab() {
 
   useEffect(() => {
     if (phase === 'single-playing' && !answered && questions[currentQ]) {
-      speak(`Question ${currentQ + 1}. ${questions[currentQ].question}`);
+      speakIfEnabled(`Question ${currentQ + 1}. ${questions[currentQ].question}`);
     }
-  }, [currentQ, phase, answered, speak, questions]);
+  }, [currentQ, phase, answered, speakIfEnabled, questions]);
 
   const nextBattleQuestion = () => {
     if (currentQ + 1 >= questions.length) {
@@ -290,7 +278,7 @@ export default function QuizTab() {
 
   const endBattle = async () => {
     setPhase('battle-result');
-    if (synthRef.current) synthRef.current.cancel();
+    stopSpeaking();
 
     // Save all participants to leaderboard
     const cat = battleSection === 'all' ? 'Battle - All Categories' : (customSections.find(s => s.id === battleSection)?.name || 'Battle');
@@ -366,9 +354,9 @@ export default function QuizTab() {
 
   const endSingleGame = async () => {
     setPhase('single-result');
-    if (synthRef.current) synthRef.current.cancel();
+    stopSpeaking();
     if (score >= questions.length * 0.8) triggerConfetti();
-    speak(`Game Over! You scored ${score} out of ${questions.length}.`);
+    speakIfEnabled(`Game Over! You scored ${score} out of ${questions.length}.`);
     try {
       const cat = allCategories ? 'All Categories' : selectedCategory;
       await fetch('/api/quiz', {

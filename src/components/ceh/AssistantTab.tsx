@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { speak, stopSpeaking, preloadVoices } from '@/lib/tts';
 import { Send, Mic, MicOff, MessageSquare, Volume2, VolumeX, X, Bot, Sparkles, Loader2 } from 'lucide-react';
 
 interface Message {
@@ -48,7 +49,6 @@ export default function AssistantTab({ avatarUrl, autoSpeak }: AssistantTabProps
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
-  const synthRef = useRef<SpeechSynthesis | null>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef(input);
   const isLoadingRef = useRef(isLoading);
@@ -56,7 +56,6 @@ export default function AssistantTab({ avatarUrl, autoSpeak }: AssistantTabProps
   const autoListenRef = useRef(autoListen);
   const schoolContextRef = useRef(schoolContext);
   const ttsEnabledRef = useRef(ttsEnabled);
-  const voicesLoadedRef = useRef(false);
 
   // Keep refs in sync
   useEffect(() => { inputRef.current = input; }, [input]);
@@ -95,45 +94,15 @@ export default function AssistantTab({ avatarUrl, autoSpeak }: AssistantTabProps
     return () => clearInterval(interval);
   }, []);
 
-  const speakRef = useRef<(text: string, callback?: () => void) => void>(() => {});
-
-  const speak = useCallback((text: string, callback?: () => void) => {
-    if (!synthRef.current || !ttsEnabledRef.current) return;
-
-    synthRef.current.cancel();
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.9;
-    utterance.pitch = 1.0;
-    utterance.volume = 1.0;
-
-    const voices = synthRef.current.getVoices();
-    const preferred = voices.find(v =>
-      v.name.includes('Google US English') ||
-      v.name.includes('Google UK English Female') ||
-      v.name.includes('Microsoft David') ||
-      v.name.includes('Microsoft Zira') ||
-      v.name.includes('Microsoft Mark') ||
-      v.name.includes('Samantha')
-    );
-    if (preferred) utterance.voice = preferred;
-    else if (voices.length > 0) {
-      const enVoice = voices.find(v => v.lang.startsWith('en'));
-      if (enVoice) utterance.voice = enVoice;
-      else utterance.voice = voices[0];
-    }
-
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => {
-      setIsSpeaking(false);
-      if (callback) callback();
-    };
-    utterance.onerror = () => setIsSpeaking(false);
-
-    synthRef.current.speak(utterance);
+  const speakWithCallback = useCallback((text: string, callback?: () => void) => {
+    if (!ttsEnabledRef.current) return;
+    setIsSpeaking(true);
+    speak(text, {
+      onStart: () => setIsSpeaking(true),
+      onEnd: () => { setIsSpeaking(false); if (callback) callback(); },
+      onError: () => setIsSpeaking(false),
+    });
   }, []);
-
-  useEffect(() => { speakRef.current = speak; }, [speak]);
 
   const startListeningRef = useRef<() => void>(() => {});
   const stopListeningRef = useRef<() => void>(() => {});
@@ -143,7 +112,7 @@ export default function AssistantTab({ avatarUrl, autoSpeak }: AssistantTabProps
     if (!messageText || isLoadingRef.current) return;
 
     stopListeningRef.current();
-    if (synthRef.current) synthRef.current.cancel();
+    stopSpeaking();
     setIsSpeaking(false);
 
     const userMessage: Message = { role: 'user', content: messageText, timestamp: new Date() };
@@ -169,11 +138,11 @@ export default function AssistantTab({ avatarUrl, autoSpeak }: AssistantTabProps
       setMessages(prev => [...prev, assistantMessage]);
 
       if (autoListenRef.current) {
-        speakRef.current(data.reply, () => {
+        speakWithCallback(data.reply, () => {
           setTimeout(() => startListeningRef.current(), 300);
         });
       } else {
-        speakRef.current(data.reply);
+        speakWithCallback(data.reply);
       }
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: "I'm experiencing a connection issue. Please check your network and try again.", timestamp: new Date() }]);
@@ -182,23 +151,10 @@ export default function AssistantTab({ avatarUrl, autoSpeak }: AssistantTabProps
     }
   }, []);
 
-  // Speech synthesis and recognition setup
+  // Speech recognition setup
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      synthRef.current = window.speechSynthesis;
-
-      // Wait for voices to load
-      const loadVoices = () => {
-        const voices = synthRef.current?.getVoices() || [];
-        if (voices.length > 0 && !voicesLoadedRef.current) {
-          voicesLoadedRef.current = true;
-          setVoicesLoaded(true);
-        }
-      };
-      loadVoices();
-      if (speechSynthesis.onvoiceschanged !== undefined) {
-        speechSynthesis.onvoiceschanged = loadVoices;
-      }
+      preloadVoices(() => setVoicesLoaded(true));
 
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRecognition) {
@@ -230,7 +186,7 @@ export default function AssistantTab({ avatarUrl, autoSpeak }: AssistantTabProps
     }
 
     return () => {
-      if (synthRef.current) synthRef.current.cancel();
+      stopSpeaking();
       if (recognitionRef.current) recognitionRef.current.abort();
     };
   }, []);
@@ -265,11 +221,11 @@ export default function AssistantTab({ avatarUrl, autoSpeak }: AssistantTabProps
 
   // Speak welcome message on navigation or first interaction
   const doGreeting = useCallback(() => {
-    if (ttsEnabledRef.current && synthRef.current && voicesLoadedRef.current && !hasInteracted) {
+    if (ttsEnabledRef.current && voicesLoaded && !hasInteracted) {
       setHasInteracted(true);
-      speak(welcomeMessage.content);
+      speakWithCallback(welcomeMessage.content);
     }
-  }, [hasInteracted, speak]);
+  }, [hasInteracted, voicesLoaded, speakWithCallback]);
 
   const handleFirstInteraction = useCallback(() => {
     if (!hasInteracted) {

@@ -38,55 +38,84 @@ function findBestVoice(): SpeechSynthesisVoice | null {
   const nameMatches = (name: string, patterns: string[]) =>
     patterns.some(p => name.toLowerCase().includes(p.toLowerCase()));
 
-  const isFemale = (v: SpeechSynthesisVoice) =>
-    nameMatches(v.name, ['female', 'zira', 'samantha', 'hazel', 'karen', 'susan', 'linda', 'catherine', 'google us english', 'google uk english female']);
+  const femalePatterns = ['female', 'zira', 'samantha', 'hazel', 'karen', 'susan',
+    'linda', 'catherine', 'jenny', 'aria', 'libby', 'aderonke', 'eno',
+    'google us english', 'google uk english female'];
 
-  // 1. Nigerian English female voice (en-NG)
+  const isFemale = (v: SpeechSynthesisVoice) =>
+    nameMatches(v.name, femalePatterns);
+
+  // 1. Nigerian English female voice (en-NG) — best for Nigerian names
   const ngFemale = voices.find(v =>
     v.lang === 'en-NG' && isFemale(v)
   );
-  if (ngFemale) return ngFemale;
+  if (ngFemale) {
+    console.log(`[tts] Selected voice: ${ngFemale.name} (${ngFemale.lang})`);
+    return ngFemale;
+  }
 
   // 2. American English female voice
   const usFemale = voices.find(v =>
     (v.lang === 'en-US' || v.lang.startsWith('en-US')) && isFemale(v)
   );
-  if (usFemale) return usFemale;
+  if (usFemale) {
+    console.log(`[tts] Selected voice: ${usFemale.name} (${usFemale.lang})`);
+    return usFemale;
+  }
 
   // 3. Nigerian English any voice
   const ngAny = voices.find(v => v.lang === 'en-NG');
-  if (ngAny) return ngAny;
+  if (ngAny) {
+    console.log(`[tts] Selected voice: ${ngAny.name} (${ngAny.lang})`);
+    return ngAny;
+  }
 
-  // 4. Named female voices (any accent)
+  // 4. Named female voices (any accent) — ordered by quality
   const preferredFemaleNames = [
-    'Microsoft Zira',       // Windows - American female
-    'Google US English',    // Chrome - American female
-    'Samantha',             // macOS - American female
+    'Microsoft Jenny',       // Windows 11 - American female (natural)
+    'Microsoft Aria',        // Windows 11 - American female (natural)
+    'Microsoft Zira',        // Windows - American female
+    'Microsoft Libby',       // Windows - American female (natural)
+    'Google US English',     // Chrome - American female
+    'Samantha',              // macOS - American female
+    'Microsoft Aderonke',    // Windows - Nigerian English female (if installed)
+    'Microsoft Eno',         // Windows - Nigerian English female (if installed)
     'Google UK English Female', // Chrome - British female
-    'Microsoft Hazel',       // Windows - British female
-    'Karen',                // macOS - Australian female
     'Microsoft Catherine',   // Windows - female
-    'Microsoft Susan',      // Windows - female
-    'Microsoft Linda',      // Windows - female
+    'Microsoft Hazel',       // Windows - British female
+    'Karen',                 // macOS - Australian female
+    'Microsoft Susan',       // Windows - female
+    'Microsoft Linda',       // Windows - female
   ];
   for (const name of preferredFemaleNames) {
     const voice = voices.find(v => v.name.includes(name));
-    if (voice) return voice;
+    if (voice) {
+      console.log(`[tts] Selected voice: ${voice.name} (${voice.lang})`);
+      return voice;
+    }
   }
 
   // 5. Any female English voice
   const femaleEn = voices.find(v =>
     v.lang.startsWith('en') &&
-    nameMatches(v.name, ['female', 'zira', 'samantha', 'hazel', 'karen'])
+    nameMatches(v.name, femalePatterns)
   );
-  if (femaleEn) return femaleEn;
+  if (femaleEn) {
+    console.log(`[tts] Selected voice: ${femaleEn.name} (${femaleEn.lang})`);
+    return femaleEn;
+  }
 
   // 6. Any English voice
   const enVoice = voices.find(v => v.lang.startsWith('en'));
-  if (enVoice) return enVoice;
+  if (enVoice) {
+    console.log(`[tts] Selected voice: ${enVoice.name} (${enVoice.lang})`);
+    return enVoice;
+  }
 
   // 7. Any voice at all
-  return voices[0];
+  const fallback = voices[0];
+  console.log(`[tts] Selected voice: ${fallback.name} (${fallback.lang})`);
+  return fallback;
 }
 
 export function speak(
