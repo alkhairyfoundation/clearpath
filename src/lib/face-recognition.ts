@@ -58,7 +58,8 @@ export async function detectFace(
 // Best face descriptor from multiple capture attempts
 export async function getBestFaceDescriptor(
   videoElement: HTMLVideoElement,
-  attempts: number = 5
+  attempts: number = 5,
+  pauseMs: number = 200
 ): Promise<number[] | null> {
   const descriptors: { descriptor: number[]; score: number }[] = [];
 
@@ -70,15 +71,39 @@ export async function getBestFaceDescriptor(
         score: result.detection.score,
       });
     }
-    // Brief pause between attempts
     if (i < attempts - 1) {
-      await new Promise(r => setTimeout(r, 200));
+      await new Promise(r => setTimeout(r, pauseMs));
     }
   }
 
   if (descriptors.length === 0) return null;
 
-  // Return descriptor from the highest-confidence detection
+  descriptors.sort((a, b) => b.score - a.score);
+  return descriptors[0].descriptor;
+}
+
+// Quick single capture for faster check-in recognition
+export async function quickFaceScan(
+  videoElement: HTMLVideoElement
+): Promise<number[] | null> {
+  const attempts = 2;
+  const descriptors: { descriptor: number[]; score: number }[] = [];
+
+  for (let i = 0; i < attempts; i++) {
+    const result = await detectFace(videoElement);
+    if (result) {
+      descriptors.push({
+        descriptor: result.descriptor,
+        score: result.detection.score,
+      });
+    }
+    if (i < attempts - 1) {
+      await new Promise(r => setTimeout(r, 150));
+    }
+  }
+
+  if (descriptors.length === 0) return null;
+
   descriptors.sort((a, b) => b.score - a.score);
   return descriptors[0].descriptor;
 }

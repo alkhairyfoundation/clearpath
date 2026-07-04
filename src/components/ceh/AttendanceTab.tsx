@@ -5,9 +5,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Camera, CameraOff, UserCheck, Users, CheckCircle, AlertCircle,
   RefreshCw, UserPlus, ScanFace, Loader2, Smile, Fingerprint,
-  User, RotateCcw
+  User, RotateCcw, Volume2, Sparkles
 } from 'lucide-react';
-import { loadFaceModels, getFaceDescriptor, getBestFaceDescriptor, findBestMatch, captureFrame } from '@/lib/face-recognition';
+import { loadFaceModels, getBestFaceDescriptor, quickFaceScan, findBestMatch, captureFrame } from '@/lib/face-recognition';
+import { speak, stopSpeaking, preloadVoices } from '@/lib/tts';
 
 interface Student {
   id: string;
@@ -43,6 +44,11 @@ export default function AttendanceTab() {
   const [recognizedStudent, setRecognizedStudent] = useState<Student | null>(null);
   const [recognizing, setRecognizing] = useState(false);
   const [recognitionStatus, setRecognitionStatus] = useState<'idle' | 'scanning' | 'found' | 'failed'>('idle');
+
+  // Welcome overlay state
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [welcomeStudent, setWelcomeStudent] = useState<Student | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
   // Enroll state
   const [enrollStudentId, setEnrollStudentId] = useState('');
@@ -108,6 +114,11 @@ export default function AttendanceTab() {
     return () => { stopCameraRef.current(); };
   }, []);
 
+  // Preload TTS voices on mount
+  useEffect(() => {
+    preloadVoices();
+  }, []);
+
   const stopCamera = useCallback(() => {
     if (scanIntervalRef.current) {
       clearInterval(scanIntervalRef.current);
@@ -121,6 +132,10 @@ export default function AttendanceTab() {
     setRecognizedStudent(null);
     setRecognizing(false);
     setRecognitionStatus('idle');
+    setShowWelcome(false);
+    setWelcomeStudent(null);
+    setIsSpeaking(false);
+    stopSpeaking();
   }, []);
 
   useEffect(() => {
@@ -170,8 +185,7 @@ export default function AttendanceTab() {
     scanIntervalRef.current = setInterval(async () => {
       if (!videoRef.current || !streamRef.current) return;
       try {
-        // Use multiple capture attempts for more reliable recognition
-        const descriptor = await getBestFaceDescriptor(videoRef.current, 3);
+        const descriptor = await quickFaceScan(videoRef.current);
         if (descriptor) {
           const match = findBestMatch(
             descriptor,
@@ -185,15 +199,36 @@ export default function AttendanceTab() {
               setRecognizedStudent(student);
               setRecognizing(false);
               setRecognitionStatus('found');
-              markAttendance(student.id);
+              markAttendance(student.id, student);
             }
           }
         }
       } catch {}
-    }, 2000); // Slightly longer interval to allow for 3 capture attempts
+    }, 1000);
   };
 
-  const markAttendance = async (studentId: string) => {
+  const showWelcomeGreeting = (student: Student, alreadyCheckedIn: boolean) => {
+    setWelcomeStudent(student);
+    setShowWelcome(true);
+
+    const greeting = alreadyCheckedIn
+      ? `${student.name} from ${student.department}, you have already checked in. Welcome back!`
+      : `Welcome, ${student.name}! You are from the ${student.department} department. Enjoy the ClearPath Edu Hub graduation ceremony!`;
+
+    setIsSpeaking(true);
+    speak(greeting, {
+      onEnd: () => setIsSpeaking(false),
+      onError: () => setIsSpeaking(false),
+    });
+
+    setTimeout(() => {
+      setShowWelcome(false);
+      setWelcomeStudent(null);
+      stopCamera();
+    }, 6000);
+  };
+
+  const markAttendance = async (studentId: string, student?: Student) => {
     setProcessing(true);
     try {
       const snapshot = videoRef.current ? captureFrame(videoRef.current) : undefined;
@@ -205,11 +240,20 @@ export default function AttendanceTab() {
       const data = await res.json();
       if (res.ok) {
         notify('success', `Welcome, ${data.student?.name || 'Student'}! ✓`);
-        setTimeout(() => stopCamera(), 2000);
         fetchRecords();
+        if (student) {
+          showWelcomeGreeting(student, false);
+        } else {
+          setTimeout(() => stopCamera(), 2000);
+        }
       } else if (res.status === 409) {
         notify('info', `${data.record?.student?.name || 'Student'} already checked in.`);
-        setTimeout(() => stopCamera(), 2000);
+        fetchRecords();
+        if (student) {
+          showWelcomeGreeting(student, true);
+        } else {
+          setTimeout(() => stopCamera(), 2000);
+        }
       } else {
         notify('error', data.error || 'Failed.');
         setRecognitionStatus('idle');
@@ -699,6 +743,92 @@ export default function AttendanceTab() {
           )}
         </div>
       </div>
+
+      {/* Welcome Overlay */}
+      <AnimatePresence>
+        {showWelcome && welcomeStudent && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.8, opacity: 0, y: 20 }}
+              transition={{ type: 'spring', damping: 20, stiffness: 200 }}
+              className="bg-white rounded-3xl shadow-2xl p-8 max-w-sm w-full mx-4 text-center relative overflow-hidden"
+            >
+              {/* Decorative top bar */}
+              <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-[#1a4d2e] via-[#d4a843] to-[#1a4d2e]" />
+
+              {/* Success icon */}
+              <div className="mt-4 mb-4 mx-auto w-20 h-20 rounded-full bg-green-100 flex items-center justify-center">
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: 'spring', damping: 10, stiffness: 200, delay: 0.2 }}
+                >
+                  <CheckCircle className="w-12 h-12 text-green-500" />
+                </motion.div>
+              </div>
+
+              {/* Student face image */}
+              {welcomeStudent.faceImage ? (
+                <img
+                  src={welcomeStudent.faceImage}
+                  alt={welcomeStudent.name}
+                  className="w-24 h-24 rounded-full object-cover mx-auto border-4 border-[#d4a843]/30 shadow-lg"
+                />
+              ) : (
+                <div className="w-24 h-24 rounded-full bg-[#1a4d2e] flex items-center justify-center mx-auto border-4 border-[#d4a843]/30 shadow-lg">
+                  <span className="text-3xl font-bold text-white">{welcomeStudent.name.charAt(0)}</span>
+                </div>
+              )}
+
+              {/* Welcome message */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4 }}
+                className="mt-4"
+              >
+                <h2 className="text-2xl font-bold text-[#1a4d2e]">{welcomeStudent.name}</h2>
+                <p className="text-sm text-[#d4a843] font-medium mt-1">{welcomeStudent.department}</p>
+                <p className="text-sm text-gray-500 mt-1">{welcomeStudent.email}</p>
+
+                <div className="mt-4 px-4 py-3 bg-gradient-to-r from-[#1a4d2e]/5 to-[#d4a843]/5 rounded-xl">
+                  <p className="text-lg font-semibold text-[#1a4d2e] flex items-center justify-center gap-2">
+                    <Sparkles className="w-5 h-5 text-[#d4a843]" />
+                    Welcome to CEH AI!
+                    <Sparkles className="w-5 h-5 text-[#d4a843]" />
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">ClearPath Edu Hub Graduation Ceremony</p>
+                </div>
+              </motion.div>
+
+              {/* Speaking indicator */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.6 }}
+                className="mt-4 flex items-center justify-center gap-2"
+              >
+                <motion.div
+                  animate={isSpeaking ? { scale: [1, 1.2, 1] } : {}}
+                  transition={{ duration: 0.8, repeat: isSpeaking ? Infinity : 0 }}
+                >
+                  <Volume2 className={`w-5 h-5 ${isSpeaking ? 'text-[#1a4d2e]' : 'text-gray-300'}`} />
+                </motion.div>
+                <span className="text-xs text-gray-400">
+                  {isSpeaking ? 'Speaking welcome...' : 'Welcome ready'}
+                </span>
+              </motion.div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Registered Students List */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
