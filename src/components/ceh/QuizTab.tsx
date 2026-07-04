@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { speak, stopSpeaking, preloadVoices } from '@/lib/tts';
 import { quizQuestions, quizCategories, QuizQuestion } from '@/lib/quiz-data';
+import { playCorrect, playWrong, playNext, playEnd } from '@/lib/sounds';
 
 type GamePhase =
   | 'menu'
@@ -51,6 +52,8 @@ export default function QuizTab() {
   const [lifelines, setLifelines] = useState({ fiftyFifty: 1, skip: 1 });
   const [streak, setStreak] = useState(0);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [questionSource, setQuestionSource] = useState<'builtin' | 'custom'>('builtin');
+  const [selectedSection, setSelectedSection] = useState<string | null>(null);
   const [confettiPieces, setConfettiPieces] = useState<any[]>([]);
   const [removedOptions, setRemovedOptions] = useState<Set<number>>(new Set());
   const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
@@ -107,7 +110,23 @@ export default function QuizTab() {
   // Single player start
   const startSingleGame = () => {
     if (!playerName.trim()) return;
-    let pool = allCategories ? [...quizQuestions] : quizQuestions.filter(q => q.category === selectedCategory);
+    let pool: QuizQuestion[];
+    if (questionSource === 'custom' && selectedSection) {
+      const section = customSections.find(s => s.id === selectedSection);
+      if (section) {
+        pool = section.questions.map(q => ({
+          id: parseInt(q.id) || 0,
+          question: q.question,
+          options: q.options as string[],
+          correct: q.correct,
+          category: section.name,
+        }));
+      } else {
+        pool = [...quizQuestions];
+      }
+    } else {
+      pool = allCategories ? [...quizQuestions] : quizQuestions.filter(q => q.category === selectedCategory);
+    }
     pool = pool.sort(() => Math.random() - 0.5).slice(0, 20);
     setQuestions(pool);
     setCurrentQ(0);
@@ -126,10 +145,19 @@ export default function QuizTab() {
   const startBattle = () => {
     if (participants.length < 2) return;
     let pool: QuizQuestion[];
-    if (battleSection === 'all') {
+    if (battleSection === 'all' || battleSection === 'mixed') {
       pool = [...quizQuestions];
-    } else if (battleSection === 'mixed') {
-      pool = [...quizQuestions];
+      customSections.forEach(section => {
+        section.questions.forEach(q => {
+          pool.push({
+            id: parseInt(q.id) || 0,
+            question: q.question,
+            options: q.options as string[],
+            correct: q.correct,
+            category: section.name,
+          });
+        });
+      });
     } else {
       const section = customSections.find(s => s.id === battleSection);
       if (section) {
@@ -165,9 +193,11 @@ export default function QuizTab() {
     if (idx === questions[currentQ].correct) {
       setScore(prev => prev + 1);
       setStreak(prev => prev + 1);
+      playCorrect();
       speakIfEnabled('Correct!');
     } else {
       setStreak(0);
+      playWrong();
       speakIfEnabled('Incorrect!');
     }
   };
@@ -187,6 +217,7 @@ export default function QuizTab() {
     };
     setParticipants(updated);
 
+    if (isCorrect) playCorrect(); else playWrong();
     speakIfEnabled(isCorrect ? `${current.name}, Correct!` : `${current.name}, Incorrect!`);
 
     advanceBattle(updated);
@@ -267,6 +298,7 @@ export default function QuizTab() {
     if (currentQ + 1 >= questions.length) {
       endBattle();
     } else {
+      playNext();
       setCurrentQ(prev => prev + 1);
       setCurrentPlayerIdx(0);
       setShowAllAnswered(false);
@@ -277,10 +309,9 @@ export default function QuizTab() {
   };
 
   const endBattle = async () => {
-    setPhase('battle-result');
     stopSpeaking();
 
-    // Save all participants to leaderboard
+    // Save all participants to leaderboard first
     const cat = battleSection === 'all' ? 'Battle - All Categories' : (customSections.find(s => s.id === battleSection)?.name || 'Battle');
     try {
       await fetch('/api/quiz', {
@@ -301,6 +332,21 @@ export default function QuizTab() {
         if (Array.isArray(data)) setLeaderboardData(data);
       }
     } catch { /* silent */ }
+
+    // Determine winner
+    const sorted = [...participants].sort((a, b) => b.score - a.score);
+    const winner = sorted[0];
+
+    playEnd();
+
+    // Announce winner via TTS then show results
+    if (voiceEnabled && winner) {
+      speak(`And the winner is ${winner.name} with ${winner.score} points! Congratulations!`, {
+        onEnd: () => setPhase('battle-result'),
+      });
+    } else {
+      setPhase('battle-result');
+    }
   };
 
   // Add participant
@@ -339,6 +385,7 @@ export default function QuizTab() {
     if (currentQ + 1 >= questions.length) {
       endSingleGame();
     } else {
+      playNext();
       setCurrentQ(prev => prev + 1);
       setSelected(null);
       setAnswered(false);
@@ -355,6 +402,7 @@ export default function QuizTab() {
   const endSingleGame = async () => {
     setPhase('single-result');
     stopSpeaking();
+    playEnd();
     if (score >= questions.length * 0.8) triggerConfetti();
     speakIfEnabled(`Game Over! You scored ${score} out of ${questions.length}.`);
     try {
@@ -520,21 +568,52 @@ export default function QuizTab() {
                 placeholder="Enter your name..."
                 className="w-full mt-1 px-4 py-2.5 rounded-lg border border-gray-200 focus:border-[#d4a843] focus:ring-1 focus:ring-[#d4a843]/20 outline-none text-sm" />
             </div>
+            {/* Question Source */}
             <div>
-              <label className="text-sm font-medium text-gray-700">Category</label>
+              <label className="text-sm font-medium text-gray-700">Question Source</label>
               <div className="mt-2 flex flex-wrap gap-2">
-                <button onClick={() => { setAllCategories(true); setSelectedCategory(null); }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${allCategories ? 'bg-[#1a4d2e] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                  All Categories
+                <button onClick={() => { setQuestionSource('builtin'); setAllCategories(true); setSelectedCategory(null); }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${questionSource === 'builtin' ? 'bg-[#1a4d2e] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                  Built-in Categories
                 </button>
-                {quizCategories.map(cat => (
-                  <button key={cat} onClick={() => { setAllCategories(false); setSelectedCategory(cat); }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${!allCategories && selectedCategory === cat ? 'bg-[#1a4d2e] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                    {cat}
+                {customSections.length > 0 && (
+                  <button onClick={() => { setQuestionSource('custom'); setSelectedSection(customSections[0]?.id || null); }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${questionSource === 'custom' ? 'bg-[#1a4d2e] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                    Custom Sections
                   </button>
-                ))}
+                )}
               </div>
             </div>
+
+            {questionSource === 'builtin' ? (
+              <div>
+                <label className="text-sm font-medium text-gray-700">Category</label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button onClick={() => { setAllCategories(true); setSelectedCategory(null); }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${allCategories ? 'bg-[#1a4d2e] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                    All Categories
+                  </button>
+                  {quizCategories.map(cat => (
+                    <button key={cat} onClick={() => { setAllCategories(false); setSelectedCategory(cat); }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${!allCategories && selectedCategory === cat ? 'bg-[#1a4d2e] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="text-sm font-medium text-gray-700">Custom Section</label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {customSections.map(s => (
+                    <button key={s.id} onClick={() => setSelectedSection(s.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${selectedSection === s.id ? 'bg-[#1a4d2e] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                      {s.name} ({s.questions.length} Qs)
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <button onClick={() => setVoiceEnabled(!voiceEnabled)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${voiceEnabled ? 'bg-[#1a4d2e]/10 text-[#1a4d2e]' : 'bg-gray-100 text-gray-500'}`}>

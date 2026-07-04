@@ -62,6 +62,9 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
   // Temp question form state
   const [qForm, setQForm] = useState({ question: '', opt1: '', opt2: '', opt3: '', opt4: '', correct: 0, points: 10 });
 
+  // Quiz sessions history
+  const [quizSessions, setQuizSessions] = useState<any[]>([]);
+
   // Health stats
   const [healthData, setHealthData] = useState<{ status: string; uptime: number; db: string; api: string; memoryUsage: string; students: number; attendance: number; version: string } | null>(null);
 
@@ -264,6 +267,41 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
     } catch { notify('error', 'Failed to delete.'); }
   };
 
+  const fetchQuizSessions = useCallback(async () => {
+    try {
+      const res = await fetch('/api/quiz');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) setQuizSessions(data);
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  const handleDeleteQuizSession = async (id: string) => {
+    try {
+      await fetch('/api/quiz', {
+        method: 'DELETE',
+        headers: adminHeaders,
+        body: JSON.stringify({ id }),
+      });
+      notify('success', 'Quiz session deleted.');
+      fetchQuizSessions();
+    } catch { notify('error', 'Failed to delete.'); }
+  };
+
+  const handleClearAllSessions = async () => {
+    if (!confirm('Delete ALL quiz history? This cannot be undone.')) return;
+    try {
+      await fetch('/api/quiz', {
+        method: 'DELETE',
+        headers: adminHeaders,
+        body: JSON.stringify({ clearAll: true }),
+      });
+      notify('success', 'All quiz history cleared.');
+      fetchQuizSessions();
+    } catch { notify('error', 'Failed to clear history.'); }
+  };
+
   const fetchHealth = useCallback(async () => {
     try {
       const res = await fetch('/api/health');
@@ -282,6 +320,7 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
       fetchLeaderboard();
       fetchSchoolInfo();
       fetchQuizSections();
+      fetchQuizSessions();
       fetchHealth();
     };
     refreshAllRef.current();
@@ -954,26 +993,41 @@ export default function AdminTab({ onStudentChange }: AdminTabProps) {
           </div>
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-            <h3 className="font-semibold text-gray-800 mb-4">Quiz Performance</h3>
-            {leaderboard.length > 0 ? (
-              <div className="space-y-2">
-                {leaderboard.slice(0, 10).map((entry, i) => (
-                  <div key={i} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-[#1a4d2e] text-white text-xs flex items-center justify-center font-bold">{i + 1}</span>
-                      <span className="text-sm font-medium">{entry.studentName}</span>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-gray-800">Quiz Performance</h3>
+              {quizSessions.length > 0 && (
+                <button onClick={handleClearAllSessions}
+                  className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-medium hover:bg-red-100 flex items-center gap-1">
+                  <Trash2 className="w-3 h-3" /> Clear All
+                </button>
+              )}
+            </div>
+            {quizSessions.length > 0 ? (
+              <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                {quizSessions.map((session, i) => (
+                  <div key={session.id} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-6 h-6 rounded-full bg-[#1a4d2e] text-white text-xs flex items-center justify-center font-bold flex-shrink-0">{i + 1}</span>
+                      <span className="text-sm font-medium truncate">{session.studentName}</span>
+                      {session.category && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-600 hidden sm:inline truncate max-w-[120px]">{session.category}</span>
+                      )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-20 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                        <div className="h-full bg-[#d4a843] rounded-full" style={{ width: `${entry.percentage}%` }} />
-                      </div>
-                      <span className="text-xs font-bold text-[#1a4d2e]">{entry.percentage}%</span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className="text-xs text-gray-500">{session.score}/{session.total}</span>
+                      <span className="text-xs font-bold text-[#1a4d2e] w-10 text-right">
+                        {session.total > 0 ? Math.round((session.score / session.total) * 100) : 0}%
+                      </span>
+                      <button onClick={() => handleDeleteQuizSession(session.id)}
+                        className="p-1 text-red-400 hover:bg-red-50 rounded">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-gray-400 text-center py-4">No quiz sessions yet</p>
+              <p className="text-sm text-gray-400 text-center py-4">No quiz history yet</p>
             )}
           </div>
         </div>

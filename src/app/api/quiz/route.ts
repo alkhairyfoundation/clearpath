@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { requireAdminAuth } from '@/lib/auth';
 
 // GET quiz sessions / leaderboard
 export async function GET() {
@@ -55,5 +56,26 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error('Quiz POST error:', error);
     return NextResponse.json({ error: 'Failed to save quiz session' }, { status: 500 });
+  }
+}
+
+// DELETE quiz session(s) (admin only)
+export async function DELETE(req: NextRequest) {
+  const { authorized, response } = await requireAdminAuth(req);
+  if (!authorized) return response;
+  try {
+    const { id, clearAll } = await req.json();
+    if (clearAll) {
+      await db.quizSession.deleteMany();
+      return NextResponse.json({ success: true, message: 'All sessions cleared' });
+    } else if (id) {
+      await db.quizSession.delete({ where: { id } });
+      return NextResponse.json({ success: true });
+    } else {
+      return NextResponse.json({ error: 'ID or clearAll required' }, { status: 400 });
+    }
+  } catch (error: any) {
+    console.error('Quiz DELETE error:', error);
+    return NextResponse.json({ error: 'Failed to delete quiz session' }, { status: 500 });
   }
 }
