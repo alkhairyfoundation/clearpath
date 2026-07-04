@@ -42,7 +42,7 @@ export async function loadFaceModels(): Promise<boolean> {
 }
 
 // Minimum confidence threshold for face detection
-const MIN_CONFIDENCE = 0.6;
+const MIN_CONFIDENCE = 0.5;
 
 export async function detectFace(
   input: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement
@@ -64,7 +64,7 @@ export async function detectFace(
 
     // Quality check: ensure the face box is reasonably sized
     const box = best.detection.box;
-    const minSize = 80;
+    const minSize = 60;
     if (box.width < minSize || box.height < minSize) return null;
 
     return {
@@ -171,8 +171,7 @@ export function findBestMatch(
 
   return {
     ...bestMatch,
-    // Stricter threshold for reliable matching (0.4 vs previous 0.5)
-    match: bestMatch.distance < 0.4,
+    match: bestMatch.distance < 0.5,
   };
 }
 

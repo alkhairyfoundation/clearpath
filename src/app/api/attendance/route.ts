@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { startOfDay, endOfDay } from 'date-fns';
 
-// GET attendance records
+const todayRange = () => ({
+  gte: startOfDay(new Date()),
+  lte: endOfDay(new Date()),
+});
+
+// GET attendance records for today
 export async function GET() {
   try {
     const records = await db.attendance.findMany({
+      where: { timestamp: todayRange() },
       include: { student: true },
       orderBy: { timestamp: 'desc' },
     });
@@ -24,9 +31,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Student ID is required' }, { status: 400 });
     }
 
-    // Check if already marked
+    // Check if already marked today
     const existing = await db.attendance.findFirst({
-      where: { studentId },
+      where: { studentId, timestamp: todayRange() },
     });
     if (existing) {
       return NextResponse.json({ error: 'Student already marked as present', record: existing }, { status: 409 });

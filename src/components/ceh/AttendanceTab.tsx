@@ -65,7 +65,8 @@ export default function AttendanceTab() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const scanIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  const scanTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const scanningRef = useRef(false);
   const stopCameraRef = useRef<() => void>(() => {});
 
   const notify = (type: 'success' | 'error' | 'info', msg: string) => {
@@ -122,9 +123,10 @@ export default function AttendanceTab() {
   }, []);
 
   const stopCamera = useCallback(() => {
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
-      scanIntervalRef.current = undefined;
+    scanningRef.current = false;
+    if (scanTimeoutRef.current) {
+      clearTimeout(scanTimeoutRef.current);
+      scanTimeoutRef.current = undefined;
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
@@ -155,7 +157,7 @@ export default function AttendanceTab() {
         streamRef.current = stream;
         setCameraOn(true);
       }
-      await loadModels();
+      await Promise.all([loadModels(), fetchStudents(), fetchRecords()]);
     } catch {
       notify('error', 'Camera access denied. Allow camera permissions.');
     }
@@ -171,45 +173,7 @@ export default function AttendanceTab() {
     }
   };
 
-  // ----- FACE CHECK-IN -----
-  const startFaceScan = async () => {
-    if (!videoRef.current || !modelsLoaded) return;
-    setRecognizing(true);
-    setRecognitionStatus('scanning');
-    const enrolled = students.filter(s => s.faceDescriptor && Array.isArray(s.faceDescriptor));
-
-    if (enrolled.length === 0) {
-      notify('info', 'No students have enrolled faces yet. Use "Enroll Face" first.');
-      setRecognizing(false);
-      setRecognitionStatus('failed');
-      return;
-    }
-
-    scanIntervalRef.current = setInterval(async () => {
-      if (!videoRef.current || !streamRef.current) return;
-      try {
-        const descriptor = await quickFaceScan(videoRef.current);
-        if (descriptor) {
-          const match = findBestMatch(
-            descriptor,
-            enrolled.map(s => ({ studentId: s.id, descriptor: s.faceDescriptor as number[] }))
-          );
-          if (match.match) {
-            clearInterval(scanIntervalRef.current!);
-            scanIntervalRef.current = undefined;
-            const student = students.find(s => s.id === match.studentId);
-            if (student) {
-              setRecognizedStudent(student);
-              setRecognizing(false);
-              setRecognitionStatus('found');
-              markAttendance(student.id, student);
-            }
-          }
-        }
-      } catch {}
-    }, 1000);
-  };
-
+  // ----- WELCOME GREETING -----
   const showWelcomeGreeting = (student: Student, alreadyCheckedIn: boolean) => {
     setWelcomeStudent(student);
     setShowWelcome(true);
@@ -231,6 +195,7 @@ export default function AttendanceTab() {
     }, 6000);
   };
 
+  // ----- MARK ATTENDANCE -----
   const markAttendance = async (studentId: string, student?: Student) => {
     setProcessing(true);
     try {
@@ -243,6 +208,7 @@ export default function AttendanceTab() {
       const data = await res.json();
       if (res.ok) {
         notify('success', `Welcome, ${data.student?.name || 'Student'}! ✓`);
+        fetchStudents();
         fetchRecords();
         if (student) {
           showWelcomeGreeting(student, false);
@@ -267,6 +233,44 @@ export default function AttendanceTab() {
     } finally {
       setProcessing(false);
     }
+  };
+
+  // ----- FACE CHECK-IN -----
+  const startFaceScan = () => {
+    if (!videoRef.current || !modelsLoaded) return;
+    const enrolled = students.filter(s => s.faceDescriptor && Array.isArray(s.faceDescriptor));
+    if (enrolled.length === 0) {
+      notify('info', 'No students have enrolled faces yet. Use "Enroll Face" first.');
+      return;
+    }
+    const enrolledList = enrolled.map(s => ({ studentId: s.id, descriptor: s.faceDescriptor as number[] }));
+    setRecognizing(true);
+    setRecognitionStatus('scanning');
+    scanningRef.current = true;
+
+    const scanOnce = async () => {
+      if (!scanningRef.current || !videoRef.current || !streamRef.current) return;
+      try {
+        const descriptor = await quickFaceScan(videoRef.current);
+        if (descriptor) {
+          const match = findBestMatch(descriptor, enrolledList);
+          if (match.match) {
+            scanningRef.current = false;
+            const student = students.find(s => s.id === match.studentId) || null;
+            setRecognizedStudent(student);
+            setRecognizing(false);
+            setRecognitionStatus('found');
+            if (student) markAttendance(student.id, student);
+            return;
+          }
+        }
+      } catch {}
+      if (scanningRef.current) {
+        scanTimeoutRef.current = setTimeout(scanOnce, 1000);
+      }
+    };
+
+    scanOnce();
   };
 
   // ----- FACE ENROLLMENT (for existing students) -----
@@ -367,8 +371,8 @@ export default function AttendanceTab() {
 
   // ----- UTILITIES -----
   const presentIds = new Set(records.map(r => r.studentId));
-  const studentsWithoutFace = students.filter(s => !s.faceDescriptor);
-  const studentsWithFace = students.filter(s => s.faceDescriptor);
+  const studentsWithFace = students.filter(s => s.faceDescriptor && Array.isArray(s.faceDescriptor));
+  const studentsWithoutFace = students.filter(s => !s.faceDescriptor || !Array.isArray(s.faceDescriptor));
 
   return (
     <div className="space-y-6">
@@ -876,8 +880,8 @@ export default function AttendanceTab() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${s.faceDescriptor ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                    {s.faceDescriptor ? 'Face enrolled' : 'No face'}
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${s.faceDescriptor && Array.isArray(s.faceDescriptor) ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {s.faceDescriptor && Array.isArray(s.faceDescriptor) ? 'Face enrolled' : 'No face'}
                   </span>
                   <span className={`text-[10px] px-2 py-0.5 rounded-full ${presentIds.has(s.id) ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
                     {presentIds.has(s.id) ? 'Present' : 'Absent'}
