@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 
 export async function POST(req: NextRequest) {
   try {
-    const { studentId, faceDescriptor, faceImage } = await req.json();
+    const { studentId, faceDescriptor, faceImage, quality } = await req.json();
 
     if (!studentId || !faceDescriptor) {
       return NextResponse.json({ error: 'Student ID and face descriptor are required' }, { status: 400 });
@@ -18,10 +18,11 @@ export async function POST(req: NextRequest) {
       data: {
         faceDescriptor: faceDescriptor,
         faceImage: faceImage || undefined,
+        faceDescriptorQuality: typeof quality === 'number' ? quality : undefined,
       },
     });
 
-    return NextResponse.json({ success: true, student });
+    return NextResponse.json({ success: true, student, quality });
   } catch (error: any) {
     console.error('Enroll face error:', error);
     return NextResponse.json({ error: 'Failed to enroll face' }, { status: 500 });

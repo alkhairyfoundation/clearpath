@@ -7,7 +7,7 @@ import {
   RefreshCw, UserPlus, ScanFace, Loader2, Smile, Fingerprint,
   User, RotateCcw, Volume2, Sparkles
 } from 'lucide-react';
-import { loadFaceModels, getBestFaceDescriptor, quickFaceScan, findBestMatch, captureFrame } from '@/lib/face-recognition';
+import { loadFaceModels, getBestFaceDescriptor, quickFaceScan, findBestMatch, captureFrame, TemporalConsensus, FaceQuality } from '@/lib/face-recognition';
 import { speak, stopSpeaking, preloadVoices } from '@/lib/tts';
 
 interface Student {
@@ -51,9 +51,13 @@ export default function AttendanceTab() {
   const [welcomeStudent, setWelcomeStudent] = useState<Student | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
+  // Scan progress
+  const [scanProgress, setScanProgress] = useState(0);
+
   // Enroll state
   const [enrollStudentId, setEnrollStudentId] = useState('');
   const [enrollStep, setEnrollStep] = useState<'select' | 'capture' | 'done'>('select');
+  const [captureQuality, setCaptureQuality] = useState<FaceQuality | null>(null);
 
   // Registration state
   const [regName, setRegName] = useState('');
@@ -61,12 +65,14 @@ export default function AttendanceTab() {
   const [regDepartment, setRegDepartment] = useState('');
   const [regFaceDescriptor, setRegFaceDescriptor] = useState<number[] | null>(null);
   const [regFaceImage, setRegFaceImage] = useState<string | null>(null);
+  const [regFaceQuality, setRegFaceQuality] = useState<number | null>(null);
   const [regStep, setRegStep] = useState<'form' | 'capture' | 'done'>('form');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const scanningRef = useRef(false);
+  const consensusRef = useRef<TemporalConsensus | null>(null);
   const stopCameraRef = useRef<() => void>(() => {});
 
   const notify = (type: 'success' | 'error' | 'info', msg: string) => {
@@ -132,11 +138,17 @@ export default function AttendanceTab() {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
+    if (consensusRef.current) {
+      consensusRef.current.reset();
+      consensusRef.current = null;
+    }
     setCameraOn(false);
     setModelsLoadFailed(false);
     setRecognizedStudent(null);
     setRecognizing(false);
     setRecognitionStatus('idle');
+    setScanProgress(0);
+    setCaptureQuality(null);
     setShowWelcome(false);
     setWelcomeStudent(null);
     setIsSpeaking(false);
@@ -183,16 +195,21 @@ export default function AttendanceTab() {
       : `Welcome, ${student.name}! You are from the ${student.department} department. Enjoy the ClearPath Edu Hub graduation ceremony!`;
 
     setIsSpeaking(true);
-    speak(greeting, {
-      onEnd: () => setIsSpeaking(false),
-      onError: () => setIsSpeaking(false),
-    });
 
-    setTimeout(() => {
-      setShowWelcome(false);
-      setWelcomeStudent(null);
-      stopCamera();
-    }, 6000);
+    const dismissOverlay = () => {
+      setIsSpeaking(false);
+      // Give user time to read the overlay after speech ends
+      setTimeout(() => {
+        setShowWelcome(false);
+        setWelcomeStudent(null);
+        stopCamera();
+      }, 2000);
+    };
+
+    speak(greeting, {
+      onEnd: dismissOverlay,
+      onError: dismissOverlay,
+    });
   };
 
   // ----- MARK ATTENDANCE -----
@@ -247,26 +264,41 @@ export default function AttendanceTab() {
     setRecognizing(true);
     setRecognitionStatus('scanning');
     scanningRef.current = true;
+    setScanProgress(0);
+    consensusRef.current = new TemporalConsensus(6, 3, 5000);
 
     const scanOnce = async () => {
       if (!scanningRef.current || !videoRef.current || !streamRef.current) return;
       try {
-        const descriptor = await quickFaceScan(videoRef.current);
-        if (descriptor) {
-          const match = findBestMatch(descriptor, enrolledList);
-          if (match.match) {
-            scanningRef.current = false;
-            const student = students.find(s => s.id === match.studentId) || null;
-            setRecognizedStudent(student);
-            setRecognizing(false);
-            setRecognitionStatus('found');
-            if (student) markAttendance(student.id, student);
-            return;
+        const result = await quickFaceScan(videoRef.current);
+        if (result) {
+          const match = findBestMatch(result.descriptor, enrolledList);
+          // Only add votes for reasonable-quality scans
+          if (result.quality.overall > 0.25) {
+            consensusRef.current?.addVote({
+              studentId: match.studentId,
+              distance: match.distance,
+              similarity: match.similarity,
+              timestamp: Date.now(),
+            });
+            const progress = Math.min(100, (consensusRef.current?.voteCount ?? 0) * 17);
+            setScanProgress(progress);
+
+            const consensus = consensusRef.current?.getConsensus();
+            if (consensus && consensus.studentId) {
+              scanningRef.current = false;
+              const student = students.find(s => s.id === consensus.studentId) || null;
+              setRecognizedStudent(student);
+              setRecognizing(false);
+              setRecognitionStatus('found');
+              if (student) markAttendance(student.id, student);
+              return;
+            }
           }
         }
       } catch {}
       if (scanningRef.current) {
-        scanTimeoutRef.current = setTimeout(scanOnce, 1000);
+        scanTimeoutRef.current = setTimeout(scanOnce, 800);
       }
     };
 
@@ -277,22 +309,31 @@ export default function AttendanceTab() {
   const captureFaceForEnroll = async () => {
     if (!videoRef.current || !modelsLoaded) return;
     setProcessing(true);
+    setCaptureQuality(null);
     try {
       // Use multiple attempts for high-quality enrollment
-      const descriptor = await getBestFaceDescriptor(videoRef.current, 5);
-      if (descriptor) {
+      const result = await getBestFaceDescriptor(videoRef.current, 8);
+      if (result) {
+        setCaptureQuality(result.quality);
+        const qualityScore = Math.round(result.quality.overall * 100);
+        if (result.quality.overall < 0.35) {
+          notify('error', `Face quality too low (${qualityScore}%). Please adjust lighting and try again.`);
+          setProcessing(false);
+          return;
+        }
         const res = await fetch('/api/students/enroll-face', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             studentId: enrollStudentId,
-            faceDescriptor: descriptor,
+            faceDescriptor: result.descriptor,
             faceImage: captureFrame(videoRef.current),
+            quality: result.quality.overall,
           }),
         });
         if (res.ok) {
           setEnrollStep('done');
-          notify('success', 'Face enrolled successfully! Student can now use auto check-in.');
+          notify('success', `Face enrolled successfully! (Quality: ${qualityScore}%)`);
           fetchStudents();
         } else {
           notify('error', 'Failed to save face data.');
@@ -313,12 +354,19 @@ export default function AttendanceTab() {
     setProcessing(true);
     try {
       // Use multiple attempts for high-quality enrollment
-      const descriptor = await getBestFaceDescriptor(videoRef.current, 5);
-      if (descriptor) {
-        setRegFaceDescriptor(descriptor);
+      const result = await getBestFaceDescriptor(videoRef.current, 8);
+      if (result) {
+        const qualityScore = Math.round(result.quality.overall * 100);
+        if (result.quality.overall < 0.35) {
+          notify('error', `Face quality too low (${qualityScore}%). Please adjust lighting and try again.`);
+          setProcessing(false);
+          return;
+        }
+        setRegFaceDescriptor(result.descriptor);
+        setRegFaceQuality(result.quality.overall);
         setRegFaceImage(captureFrame(videoRef.current));
         setRegStep('done');
-        notify('success', 'Face captured!');
+        notify('success', `Face captured! (Quality: ${qualityScore}%)`);
       } else {
         notify('error', 'No face detected. Ensure your face is visible and well-lit.');
       }
@@ -349,12 +397,13 @@ export default function AttendanceTab() {
           department: regDepartment,
           faceImage: regFaceImage,
           faceDescriptor: regFaceDescriptor,
+          faceDescriptorQuality: regFaceQuality,
         }),
       });
       if (res.ok) {
         notify('success', `${regName} registered & face enrolled!`);
         setRegName(''); setRegEmail(''); setRegDepartment('');
-        setRegFaceDescriptor(null); setRegFaceImage(null);
+        setRegFaceDescriptor(null); setRegFaceImage(null); setRegFaceQuality(null);
         setRegStep('form');
         stopCamera();
         fetchStudents();
@@ -493,8 +542,19 @@ export default function AttendanceTab() {
             {cameraOn && recognitionStatus === 'scanning' && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="border-2 border-[#d4a843] rounded-lg w-48 h-48 opacity-50 animate-pulse" />
-                <div className="absolute bottom-4 bg-black/60 text-white text-xs px-3 py-1 rounded-full flex items-center gap-1">
-                  <Loader2 className="w-3 h-3 animate-spin" /> Scanning...
+                <div className="absolute bottom-4 left-2 right-2 flex flex-col items-center gap-1">
+                  <div className="bg-black/60 text-white text-xs px-3 py-1 rounded-full flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Confirming identity...
+                  </div>
+                  <div className="w-32 h-1.5 bg-black/40 rounded-full overflow-hidden">
+                    <motion.div
+                      className="h-full bg-[#d4a843] rounded-full"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${scanProgress}%` }}
+                      transition={{ duration: 0.3 }}
+                    />
+                  </div>
+                  <span className="text-[10px] text-white/70">{scanProgress}% confidence</span>
                 </div>
               </div>
             )}
@@ -548,14 +608,41 @@ export default function AttendanceTab() {
           {cameraOn && flow === 'enroll' && (
             <div className="p-4 border-t border-gray-100">
               {enrollStep === 'capture' && (
-                <button
-                  onClick={captureFaceForEnroll}
-                  disabled={processing}
-                  className="w-full py-2.5 bg-[#d4a843] text-[#1a4d2e] rounded-xl text-sm font-bold hover:bg-[#d4a843]/80 disabled:opacity-40 flex items-center justify-center gap-2"
-                >
-                  {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
-                  Capture Face to Enroll
-                </button>
+                <div className="space-y-2">
+                  {captureQuality && (
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="text-gray-500">Quality:</span>
+                      <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                        <motion.div
+                          className={`h-full rounded-full ${
+                            captureQuality.overall > 0.6 ? 'bg-green-500' :
+                            captureQuality.overall > 0.35 ? 'bg-amber-500' : 'bg-red-500'
+                          }`}
+                          initial={{ width: 0 }}
+                          animate={{ width: `${Math.round(captureQuality.overall * 100)}%` }}
+                          transition={{ duration: 0.5 }}
+                        />
+                      </div>
+                      <span className={`font-medium ${
+                        captureQuality.overall > 0.6 ? 'text-green-600' :
+                        captureQuality.overall > 0.35 ? 'text-amber-600' : 'text-red-600'
+                      }`}>
+                        {Math.round(captureQuality.overall * 100)}%
+                      </span>
+                    </div>
+                  )}
+                  <button
+                    onClick={captureFaceForEnroll}
+                    disabled={processing}
+                    className="w-full py-2.5 bg-[#d4a843] text-[#1a4d2e] rounded-xl text-sm font-bold hover:bg-[#d4a843]/80 disabled:opacity-40 flex items-center justify-center gap-2"
+                  >
+                    {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+                    Capture Face to Enroll
+                  </button>
+                  <p className="text-[10px] text-gray-400 text-center">
+                    Look straight at the camera in good lighting
+                  </p>
+                </div>
               )}
               {enrollStep === 'done' && (
                 <p className="text-center text-sm text-green-700 font-medium flex items-center justify-center gap-1">
@@ -567,21 +654,26 @@ export default function AttendanceTab() {
 
           {cameraOn && flow === 'register' && regStep === 'capture' && (
             <div className="p-4 border-t border-gray-100">
-              <button
-                onClick={captureFaceForRegistration}
-                disabled={processing}
-                className="w-full py-2.5 bg-[#d4a843] text-[#1a4d2e] rounded-xl text-sm font-bold hover:bg-[#d4a843]/80 disabled:opacity-40 flex items-center justify-center gap-2"
-              >
-                {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
-                Capture Face
-              </button>
+              <div className="space-y-2">
+                <button
+                  onClick={captureFaceForRegistration}
+                  disabled={processing}
+                  className="w-full py-2.5 bg-[#d4a843] text-[#1a4d2e] rounded-xl text-sm font-bold hover:bg-[#d4a843]/80 disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  {processing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+                  Capture Face
+                </button>
+                <p className="text-[10px] text-gray-400 text-center">
+                  Look straight at the camera in good lighting
+                </p>
+              </div>
             </div>
           )}
 
           {cameraOn && flow === 'register' && regStep === 'done' && (
             <div className="p-4 border-t border-gray-100">
               <p className="text-center text-sm text-green-700 font-medium flex items-center justify-center gap-1">
-                <CheckCircle className="w-4 h-4" /> Face captured! Complete registration.
+                <CheckCircle className="w-4 h-4" /> Face captured! Complete registration below.
               </p>
             </div>
           )}

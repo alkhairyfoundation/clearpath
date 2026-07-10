@@ -13,8 +13,9 @@ model Student {
   name            String
   email           String            @unique
   department      String
-  faceImage       String?           @db.Text
-  faceDescriptor  Json?
+  faceImage              String?           @db.Text
+  faceDescriptor         Json?
+  faceDescriptorQuality  Float?
   registeredAt    DateTime          @default(now())
   attendance      Attendance[]
 }

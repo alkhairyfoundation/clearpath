@@ -18,7 +18,7 @@ export async function GET() {
 // POST create student (public - for self-registration via attendance)
 export async function POST(req: NextRequest) {
   try {
-    const { name, email, department, faceImage, faceDescriptor } = await req.json();
+    const { name, email, department, faceImage, faceDescriptor, faceDescriptorQuality } = await req.json();
     
     if (!name || !email || !department) {
       return NextResponse.json({ error: 'Name, email, and department are required' }, { status: 400 });
@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
         department,
         faceImage: faceImage || null,
         faceDescriptor: faceDescriptor || null,
+        faceDescriptorQuality: typeof faceDescriptorQuality === 'number' ? faceDescriptorQuality : null,
       },
     });
     
@@ -49,7 +50,7 @@ export async function PUT(req: NextRequest) {
   const { authorized, response } = await requireAdminAuth(req);
   if (!authorized) return response;
   try {
-    const { id, name, email, department, faceImage, faceDescriptor } = await req.json();
+    const { id, name, email, department, faceImage, faceDescriptor, faceDescriptorQuality } = await req.json();
     if (!id) {
       return NextResponse.json({ error: 'Student ID is required' }, { status: 400 });
     }
@@ -60,6 +61,7 @@ export async function PUT(req: NextRequest) {
     if (department !== undefined) data.department = department;
     if (faceImage !== undefined) data.faceImage = faceImage;
     if (faceDescriptor !== undefined) data.faceDescriptor = faceDescriptor;
+    if (faceDescriptorQuality !== undefined) data.faceDescriptorQuality = faceDescriptorQuality;
 
     const student = await db.student.update({ where: { id }, data });
     return NextResponse.json(student);
