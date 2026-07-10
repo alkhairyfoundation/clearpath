@@ -1,11 +1,9 @@
-const MODEL_URLS = [
-  'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/model/',
-  'https://unpkg.com/@vladmandic/face-api@1.7.15/model/',
-];
-const LOAD_TIMEOUT_MS = 30000;
+const MODEL_BASE = '/models';
+const LOAD_TIMEOUT_MS = 120000;
 
 let faceapi: any = null;
 let modelsLoaded = false;
+let loadingGuard: Promise<boolean> | null = null;
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -16,29 +14,41 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-async function loadModelsFromUrl(url: string): Promise<boolean> {
-  const faceApiModule = await import('@vladmandic/face-api');
-  faceapi = faceApiModule;
-  await withTimeout(faceapi.nets.ssdMobilenetv1.loadFromUri(url), LOAD_TIMEOUT_MS);
-  await withTimeout(faceapi.nets.faceLandmark68Net.loadFromUri(url), LOAD_TIMEOUT_MS);
-  await withTimeout(faceapi.nets.faceRecognitionNet.loadFromUri(url), LOAD_TIMEOUT_MS);
-  return true;
-}
-
-export async function loadFaceModels(): Promise<boolean> {
+export async function loadFaceModels(onProgress?: (loaded: number, total: number) => void): Promise<boolean> {
   if (modelsLoaded) return true;
-  for (const url of MODEL_URLS) {
+  if (loadingGuard) return loadingGuard;
+
+  loadingGuard = (async () => {
     try {
-      console.log(`[face-api] Loading models from: ${url}`);
-      const ok = await loadModelsFromUrl(url);
-      modelsLoaded = ok;
-      return ok;
+      const faceApiModule = await import('@vladmandic/face-api');
+      faceapi = faceApiModule;
+
+      const models = [
+        { name: 'Tiny Face Detector', load: () => faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_BASE) },
+        { name: 'Face Landmark 68', load: () => faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_BASE) },
+        { name: 'Face Recognition', load: () => faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_BASE) },
+      ];
+
+      for (let i = 0; i < models.length; i++) {
+        console.log(`[face-api] Loading ${models[i].name} from ${MODEL_BASE}`);
+        onProgress?.(i, models.length);
+        await withTimeout(models[i].load(), LOAD_TIMEOUT_MS);
+        console.log(`[face-api] ${models[i].name} loaded`);
+      }
+
+      onProgress?.(models.length, models.length);
+      modelsLoaded = true;
+      return true;
     } catch (err) {
-      console.warn(`[face-api] Failed to load from ${url}:`, err);
+      console.error('[face-api] Model loading failed:', err);
+      modelsLoaded = false;
+      return false;
+    } finally {
+      loadingGuard = null;
     }
-  }
-  console.error('[face-api] All CDN URLs failed');
-  return false;
+  })();
+
+  return loadingGuard;
 }
 
 // ===================== FACE QUALITY ASSESSMENT =====================
@@ -180,7 +190,7 @@ export async function detectFace(
   if (!faceapi) return null;
   try {
     const results = await faceapi
-      .detectAllFaces(input, new faceapi.SsdMobilenetv1Options({ minConfidence: MIN_CONFIDENCE }))
+      .detectAllFaces(input, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: MIN_CONFIDENCE }))
       .withFaceLandmarks()
       .withFaceDescriptors();
 

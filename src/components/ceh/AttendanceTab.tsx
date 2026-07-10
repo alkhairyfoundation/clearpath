@@ -38,6 +38,7 @@ export default function AttendanceTab() {
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [modelsLoadFailed, setModelsLoadFailed] = useState(false);
   const [loadingModels, setLoadingModels] = useState(false);
+  const [modelLoadProgress, setModelLoadProgress] = useState(0);
   const [processing, setProcessing] = useState(false);
   const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'info'; msg: string } | null>(null);
 
@@ -83,11 +84,14 @@ export default function AttendanceTab() {
   const loadModels = async () => {
     if (modelsLoaded) return true;
     setLoadingModels(true);
-    const ok = await loadFaceModels();
+    setModelLoadProgress(0);
+    const ok = await loadFaceModels((loaded, total) => {
+      setModelLoadProgress(total > 0 ? Math.round((loaded / total) * 100) : 0);
+    });
     setModelsLoaded(ok);
     setModelsLoadFailed(!ok);
     setLoadingModels(false);
-    if (!ok) notify('error', 'Failed to load face recognition models.');
+    if (!ok) notify('error', 'Failed to load face recognition models. Check your internet and refresh.');
     return ok;
   };
 
@@ -144,6 +148,7 @@ export default function AttendanceTab() {
     }
     setCameraOn(false);
     setModelsLoadFailed(false);
+    setModelLoadProgress(0);
     setRecognizedStudent(null);
     setRecognizing(false);
     setRecognitionStatus('idle');
@@ -560,8 +565,18 @@ export default function AttendanceTab() {
             )}
 
             {loadingModels && cameraOn && (
-              <div className="absolute top-2 left-2 bg-black/60 text-white text-xs px-3 py-1 rounded-full flex items-center gap-1">
-                <Loader2 className="w-3 h-3 animate-spin" /> Loading AI models...
+              <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-2">
+                <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                <span>Loading AI models...</span>
+                <div className="w-12 h-1.5 bg-white/20 rounded-full overflow-hidden shrink-0">
+                  <motion.div
+                    className="h-full bg-green-400 rounded-full"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${modelLoadProgress}%` }}
+                    transition={{ duration: 0.3 }}
+                  />
+                </div>
+                <span className="tabular-nums">{modelLoadProgress}%</span>
               </div>
             )}
             {modelsLoadFailed && cameraOn && (
