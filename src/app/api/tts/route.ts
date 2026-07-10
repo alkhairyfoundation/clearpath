@@ -131,12 +131,13 @@ export async function POST(req: NextRequest) {
 
     const voiceName = voice && EDGE_VOICES[voice] ? voice : 'en-US-JennyNeural';
     const audioBuffer = await synthesizeWithEdge(text, voiceName);
+    const audioData = new Uint8Array(audioBuffer);
 
-    return new NextResponse(audioBuffer, {
+    return new NextResponse(audioData, {
       status: 200,
       headers: {
         'Content-Type': 'audio/mpeg',
-        'Content-Length': audioBuffer.length.toString(),
+        'Content-Length': audioData.length.toString(),
         'Cache-Control': 'private, max-age=3600',
       },
     });
