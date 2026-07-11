@@ -121,7 +121,7 @@ function detectBlur(canvas: HTMLCanvasElement): number {
   const mean = sum / count;
   const variance = sumSq / count - mean * mean;
   // Normalize: typical sharp face ~ 50-200+, blurry < 20
-  return Math.min(1, variance / 120);
+  return Math.min(1, variance / 60);
 }
 
 function checkPose(landmarks: any): { frontal: boolean; score: number } {
@@ -171,18 +171,18 @@ function assessFaceQuality(
   const pose = checkPose(landmarks);
   const brightness = checkBrightness(sourceCanvas);
   const overall = (
-    blurScore * 0.25 +
+    blurScore * 0.15 +
     pose.score * 0.30 +
     brightness.score * 0.15 +
-    detectionScore * 0.30
+    detectionScore * 0.40
   );
   return { blurScore, poseScore: pose.score, brightnessScore: brightness.score, detectionScore, overall };
 }
 
 // ===================== ENHANCED FACE DETECTION =====================
 
-const MIN_CONFIDENCE = 0.6;
-const MIN_FACE_SIZE = 80;
+const MIN_CONFIDENCE = 0.4;
+const MIN_FACE_SIZE = 60;
 
 export async function detectFace(
   input: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement
@@ -190,7 +190,7 @@ export async function detectFace(
   if (!faceapi) return null;
   try {
     const results = await faceapi
-      .detectAllFaces(input, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: MIN_CONFIDENCE }))
+      .detectAllFaces(input, new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: MIN_CONFIDENCE }))
       .withFaceLandmarks()
       .withFaceDescriptors();
 
@@ -232,7 +232,7 @@ export async function getBestFaceDescriptor(
     const result = await detectFace(videoElement);
     if (result) {
       // Only accept decent quality captures
-      if (result.quality.overall > 0.3) {
+      if (result.quality.overall > 0.15) {
         results.push({
           descriptor: result.descriptor,
           quality: result.quality,
@@ -282,7 +282,7 @@ export async function quickFaceScan(
   videoElement: HTMLVideoElement
 ): Promise<{ descriptor: number[]; quality: FaceQuality } | null> {
   const result = await detectFace(videoElement);
-  if (!result || result.quality.overall < 0.25) return null;
+  if (!result || result.quality.overall < 0.15) return null;
   return { descriptor: result.descriptor, quality: result.quality };
 }
 
@@ -372,10 +372,10 @@ export function findBestMatch(
 
   // Margin check: if #1 and #2 are too close, it's ambiguous
   const margin = second ? (second.distance - best.distance) / (best.distance || 1) : Infinity;
-  const hasMargin = margin > 0.12;
+  const hasMargin = margin > 0.08;
 
   // Adaptive threshold: lower threshold for lower-quality captures
-  const threshold = 0.45;
+  const threshold = 0.55;
 
   const match = best.distance < threshold && hasMargin;
 
@@ -404,9 +404,9 @@ export class TemporalConsensus {
   private readonly windowDuration: number;
 
   constructor(
-    maxWindow: number = 6,
-    requiredConsensus: number = 3,
-    windowDurationMs: number = 5000
+    maxWindow: number = 5,
+    requiredConsensus: number = 2,
+    windowDurationMs: number = 4000
   ) {
     this.maxWindow = maxWindow;
     this.requiredConsensus = requiredConsensus;

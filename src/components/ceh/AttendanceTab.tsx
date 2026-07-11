@@ -259,7 +259,10 @@ export default function AttendanceTab() {
 
   // ----- FACE CHECK-IN -----
   const startFaceScan = () => {
-    if (!videoRef.current || !modelsLoaded) return;
+    if (!videoRef.current || !modelsLoaded) {
+      if (!modelsLoaded) notify('error', 'AI models not loaded yet. Please wait.');
+      return;
+    }
     const enrolled = students.filter(s => s.faceDescriptor && Array.isArray(s.faceDescriptor));
     if (enrolled.length === 0) {
       notify('info', 'No students have enrolled faces yet. Use "Enroll Face" first.');
@@ -270,7 +273,7 @@ export default function AttendanceTab() {
     setRecognitionStatus('scanning');
     scanningRef.current = true;
     setScanProgress(0);
-    consensusRef.current = new TemporalConsensus(6, 3, 5000);
+    consensusRef.current = new TemporalConsensus(5, 2, 4000);
 
     const scanOnce = async () => {
       if (!scanningRef.current || !videoRef.current || !streamRef.current) return;
@@ -279,14 +282,14 @@ export default function AttendanceTab() {
         if (result) {
           const match = findBestMatch(result.descriptor, enrolledList);
           // Only add votes for reasonable-quality scans
-          if (result.quality.overall > 0.25) {
+          if (result.quality.overall > 0.15) {
             consensusRef.current?.addVote({
               studentId: match.studentId,
               distance: match.distance,
               similarity: match.similarity,
               timestamp: Date.now(),
             });
-            const progress = Math.min(100, (consensusRef.current?.voteCount ?? 0) * 17);
+            const progress = Math.min(100, (consensusRef.current?.voteCount ?? 0) * 20);
             setScanProgress(progress);
 
             const consensus = consensusRef.current?.getConsensus();
@@ -303,7 +306,7 @@ export default function AttendanceTab() {
         }
       } catch {}
       if (scanningRef.current) {
-        scanTimeoutRef.current = setTimeout(scanOnce, 800);
+        scanTimeoutRef.current = setTimeout(scanOnce, 600);
       }
     };
 
@@ -312,7 +315,10 @@ export default function AttendanceTab() {
 
   // ----- FACE ENROLLMENT (for existing students) -----
   const captureFaceForEnroll = async () => {
-    if (!videoRef.current || !modelsLoaded) return;
+    if (!videoRef.current || !modelsLoaded) {
+      if (!modelsLoaded) notify('error', 'AI models not loaded yet. Please wait.');
+      return;
+    }
     setProcessing(true);
     setCaptureQuality(null);
     try {
@@ -321,7 +327,7 @@ export default function AttendanceTab() {
       if (result) {
         setCaptureQuality(result.quality);
         const qualityScore = Math.round(result.quality.overall * 100);
-        if (result.quality.overall < 0.35) {
+        if (result.quality.overall < 0.20) {
           notify('error', `Face quality too low (${qualityScore}%). Please adjust lighting and try again.`);
           setProcessing(false);
           return;
@@ -355,14 +361,17 @@ export default function AttendanceTab() {
 
   // ----- NEW REGISTRATION + FACE ENROLL -----
   const captureFaceForRegistration = async () => {
-    if (!videoRef.current || !modelsLoaded) return;
+    if (!videoRef.current || !modelsLoaded) {
+      if (!modelsLoaded) notify('error', 'AI models not loaded yet. Please wait.');
+      return;
+    }
     setProcessing(true);
     try {
       // Use multiple attempts for high-quality enrollment
       const result = await getBestFaceDescriptor(videoRef.current, 8);
       if (result) {
         const qualityScore = Math.round(result.quality.overall * 100);
-        if (result.quality.overall < 0.35) {
+        if (result.quality.overall < 0.20) {
           notify('error', `Face quality too low (${qualityScore}%). Please adjust lighting and try again.`);
           setProcessing(false);
           return;
