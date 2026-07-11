@@ -10,7 +10,7 @@ export async function GET() {
     });
     return NextResponse.json(students);
   } catch (error: any) {
-    console.error('Students GET error:', error);
+    console.error('Students GET error:', error.message || error);
     return NextResponse.json({ error: 'Failed to fetch students' }, { status: 500 });
   }
 }
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     if (error.code === 'P2002') {
       return NextResponse.json({ error: 'Student with this email already exists' }, { status: 409 });
     }
-    console.error('Students POST error:', error);
+    console.error('Students POST error:', error.message || error);
     return NextResponse.json({ error: 'Failed to create student' }, { status: 500 });
   }
 }
@@ -69,7 +69,7 @@ export async function PUT(req: NextRequest) {
     if (error.code === 'P2002') {
       return NextResponse.json({ error: 'Another student with this email already exists' }, { status: 409 });
     }
-    console.error('Students PUT error:', error);
+    console.error('Students PUT error:', error.message || error);
     return NextResponse.json({ error: 'Failed to update student' }, { status: 500 });
   }
 }
@@ -89,7 +89,7 @@ export async function DELETE(req: NextRequest) {
     
     return NextResponse.json({ success: true });
   } catch (error: any) {
-    console.error('Students DELETE error:', error);
+    console.error('Students DELETE error:', error.message || error);
     return NextResponse.json({ error: 'Failed to delete student' }, { status: 500 });
   }
 }
