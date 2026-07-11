@@ -3,9 +3,6 @@ let voicesLoaded = false;
 let onVoicesReady: (() => void) | null = null;
 let currentAudio: HTMLAudioElement | null = null;
 
-// Voice quality levels
-export type VoiceQuality = 'natural' | 'decent' | 'robotic' | 'unavailable';
-
 export function isSpeechSupported(): boolean {
   return typeof window !== 'undefined' && 'speechSynthesis' in window;
 }
@@ -38,34 +35,6 @@ export function areVoicesLoaded(): boolean {
   return voicesLoaded;
 }
 
-export function getVoiceQuality(): VoiceQuality {
-  if (!synth) {
-    if (!isSpeechSupported()) return 'unavailable';
-    synth = window.speechSynthesis;
-  }
-  const voices = synth.getVoices();
-  if (voices.length === 0) return 'unavailable';
-
-  const voiceNames = voices.map(v => v.name.toLowerCase());
-
-  // Check for neural/natural voices (best quality)
-  const hasNatural = voiceNames.some(n =>
-    n.includes('natural') || n.includes('neural') ||
-    n.includes('microsoft jenny') || n.includes('microsoft aria') ||
-    n.includes('google us english') || n.includes('google uk english female')
-  );
-  if (hasNatural) return 'natural';
-
-  // Check for decent voices
-  const hasDecent = voiceNames.some(n =>
-    n.includes('zira') || n.includes('david') ||
-    n.includes('samantha') || n.includes('karen')
-  );
-  if (hasDecent) return 'decent';
-
-  return 'robotic';
-}
-
 function findBestVoice(): SpeechSynthesisVoice | null {
   if (!synth) return null;
   const voices = synth.getVoices();
@@ -91,7 +60,6 @@ function findBestVoice(): SpeechSynthesisVoice | null {
   const isFemale = (v: SpeechSynthesisVoice) =>
     nameMatches(v.name, femalePatterns);
 
-  // 1. Natural/Neural voices (best quality)
   for (const v of voices) {
     if (nameMatches(v.name, naturalPatterns)) {
       console.log(`[tts] Selected voice: ${v.name} (${v.lang})`);
@@ -99,14 +67,12 @@ function findBestVoice(): SpeechSynthesisVoice | null {
     }
   }
 
-  // 2. Nigerian English female voice (for Nigerian names)
   const ngFemale = voices.find(v => v.lang === 'en-NG' && isFemale(v));
   if (ngFemale) {
     console.log(`[tts] Selected voice: ${ngFemale.name} (${ngFemale.lang})`);
     return ngFemale;
   }
 
-  // 3. American English female voice
   const usFemale = voices.find(v =>
     (v.lang === 'en-US' || v.lang.startsWith('en-US')) && isFemale(v)
   );
@@ -115,14 +81,12 @@ function findBestVoice(): SpeechSynthesisVoice | null {
     return usFemale;
   }
 
-  // 4. Nigerian English any voice
   const ngAny = voices.find(v => v.lang === 'en-NG');
   if (ngAny) {
     console.log(`[tts] Selected voice: ${ngAny.name} (${ngAny.lang})`);
     return ngAny;
   }
 
-  // 5. Named female voices (any accent)
   const preferredFemaleNames = [
     'Microsoft Zira', 'Microsoft Libby', 'Google US English',
     'Samantha', 'Microsoft Catherine', 'Microsoft Hazel',
@@ -136,7 +100,6 @@ function findBestVoice(): SpeechSynthesisVoice | null {
     }
   }
 
-  // 6. Any female English voice
   const femaleEn = voices.find(v =>
     v.lang.startsWith('en') && nameMatches(v.name, femalePatterns)
   );
@@ -145,30 +108,58 @@ function findBestVoice(): SpeechSynthesisVoice | null {
     return femaleEn;
   }
 
-  // 7. Any English voice
   const enVoice = voices.find(v => v.lang.startsWith('en'));
   if (enVoice) {
     console.log(`[tts] Selected voice: ${enVoice.name} (${enVoice.lang})`);
     return enVoice;
   }
 
-  // 8. Any voice at all
   const fallback = voices[0];
   console.log(`[tts] Selected voice: ${fallback.name} (${fallback.lang})`);
   return fallback;
 }
 
-async function speakWithServerTTS(
+function speakWithBrowser(
   text: string,
-  options?: {
-    onStart?: () => void;
-    onEnd?: () => void;
-    onError?: () => void;
+  onStart?: () => void,
+  onEnd?: () => void,
+  onError?: () => void
+): void {
+  if (!synth) {
+    if (!isSpeechSupported()) {
+      onError?.();
+      return;
+    }
+    synth = window.speechSynthesis;
   }
-): Promise<boolean> {
+
+  synth.cancel();
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = 0.9;
+  utterance.pitch = 1.05;
+  utterance.volume = 1.0;
+  utterance.lang = 'en-US';
+
+  const voice = findBestVoice();
+  if (voice) utterance.voice = voice;
+
+  if (onStart) utterance.onstart = onStart;
+  if (onEnd) utterance.onend = onEnd;
+  if (onError) utterance.onerror = onError;
+
+  synth.speak(utterance);
+}
+
+async function speakWithServer(
+  text: string,
+  onStart?: () => void,
+  onEnd?: () => void,
+  onError?: () => void
+): Promise<void> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
     const res = await fetch('/api/tts', {
       method: 'POST',
@@ -179,76 +170,40 @@ async function speakWithServerTTS(
 
     clearTimeout(timeoutId);
 
-    if (!res.ok) return false;
+    if (!res.ok) {
+      onError?.();
+      return;
+    }
 
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
-
     const audio = new Audio(url);
+
     currentAudio = audio;
+    onStart?.();
 
-    options?.onStart?.();
+    audio.onended = () => {
+      URL.revokeObjectURL(url);
+      currentAudio = null;
+      onEnd?.();
+    };
 
-    return new Promise((resolve) => {
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-        currentAudio = null;
-        options?.onEnd?.();
-        resolve(true);
-      };
-      audio.onerror = () => {
-        URL.revokeObjectURL(url);
-        currentAudio = null;
-        options?.onError?.();
-        resolve(false);
-      };
-      audio.play().catch(() => {
-        URL.revokeObjectURL(url);
-        currentAudio = null;
-        options?.onError?.();
-        resolve(false);
-      });
-    });
-  } catch {
-    return false;
-  }
-}
+    audio.onerror = () => {
+      URL.revokeObjectURL(url);
+      currentAudio = null;
+      onError?.();
+    };
 
-function speakWithBrowserTTS(
-  text: string,
-  options?: {
-    rate?: number;
-    pitch?: number;
-    volume?: number;
-    onStart?: () => void;
-    onEnd?: () => void;
-    onError?: () => void;
-  }
-): void {
-  if (!synth) {
-    if (!isSpeechSupported()) {
-      options?.onError?.();
-      return;
+    try {
+      await audio.play();
+    } catch {
+      URL.revokeObjectURL(url);
+      currentAudio = null;
+      onError?.();
     }
-    synth = window.speechSynthesis;
+  } catch {
+    onError?.();
   }
-
-  synth.cancel();
-
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = options?.rate ?? 0.9;
-  utterance.pitch = options?.pitch ?? 1.05;
-  utterance.volume = options?.volume ?? 1.0;
-  utterance.lang = 'en-US';
-
-  const voice = findBestVoice();
-  if (voice) utterance.voice = voice;
-
-  if (options?.onStart) utterance.onstart = options.onStart;
-  if (options?.onEnd) utterance.onend = options.onEnd;
-  if (options?.onError) utterance.onerror = options.onError;
-
-  synth.speak(utterance);
 }
 
 export function speak(
@@ -262,13 +217,10 @@ export function speak(
     onError?: () => void;
   }
 ): void {
-  // Try server Edge TTS first for natural voice
-  speakWithServerTTS(text, {
-    onStart: options?.onStart,
-    onEnd: options?.onEnd,
-    onError: () => {
-      // Fallback to browser TTS if server fails
-      speakWithBrowserTTS(text, options);
-    },
+  const { onStart, onEnd, onError } = options || {};
+
+  speakWithServer(text, onStart, onEnd, () => {
+    // Server TTS failed — fall back to browser TTS
+    speakWithBrowser(text, onStart, onEnd, onError);
   });
 }
