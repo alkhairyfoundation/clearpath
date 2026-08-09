@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAdminAuth } from '@/lib/auth';
+import { isValidDescriptor, normalizeDescriptor } from '@/lib/face-descriptor';
 
 // GET all students
 export async function GET() {
@@ -24,13 +25,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Name, email, and department are required' }, { status: 400 });
     }
 
+    if (faceDescriptor !== undefined && faceDescriptor !== null && !isValidDescriptor(faceDescriptor)) {
+      return NextResponse.json({ error: 'Face descriptor must be an array of 128 finite floats' }, { status: 400 });
+    }
+
     const student = await db.student.create({
       data: {
         name,
         email,
         department,
         faceImage: faceImage || null,
-        faceDescriptor: faceDescriptor || null,
+        faceDescriptor: faceDescriptor ? normalizeDescriptor(faceDescriptor) : null,
         faceDescriptorQuality: typeof faceDescriptorQuality === 'number' ? faceDescriptorQuality : null,
       },
     });
@@ -60,7 +65,12 @@ export async function PUT(req: NextRequest) {
     if (email !== undefined) data.email = email;
     if (department !== undefined) data.department = department;
     if (faceImage !== undefined) data.faceImage = faceImage;
-    if (faceDescriptor !== undefined) data.faceDescriptor = faceDescriptor;
+    if (faceDescriptor !== undefined) {
+      if (faceDescriptor !== null && !isValidDescriptor(faceDescriptor)) {
+        return NextResponse.json({ error: 'Face descriptor must be an array of 128 finite floats' }, { status: 400 });
+      }
+      data.faceDescriptor = faceDescriptor ? normalizeDescriptor(faceDescriptor) : null;
+    }
     if (faceDescriptorQuality !== undefined) data.faceDescriptorQuality = faceDescriptorQuality;
 
     const student = await db.student.update({ where: { id }, data });
