@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { requireAdminAuth } from '@/lib/auth';
 import { isValidDescriptor, normalizeDescriptor } from '@/lib/face-descriptor';
+import { Prisma } from '@prisma/client';
 
 // GET all students
 export async function GET() {
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest) {
         email,
         department,
         faceImage: faceImage || null,
-        faceDescriptor: faceDescriptor ? normalizeDescriptor(faceDescriptor) : null,
+        faceDescriptor: faceDescriptor ? normalizeDescriptor(faceDescriptor) : Prisma.DbNull,
         faceDescriptorQuality: typeof faceDescriptorQuality === 'number' ? faceDescriptorQuality : null,
       },
     });
@@ -69,7 +70,7 @@ export async function PUT(req: NextRequest) {
       if (faceDescriptor !== null && !isValidDescriptor(faceDescriptor)) {
         return NextResponse.json({ error: 'Face descriptor must be an array of 128 finite floats' }, { status: 400 });
       }
-      data.faceDescriptor = faceDescriptor ? normalizeDescriptor(faceDescriptor) : null;
+      data.faceDescriptor = faceDescriptor ? normalizeDescriptor(faceDescriptor) : Prisma.DbNull;
     }
     if (faceDescriptorQuality !== undefined) data.faceDescriptorQuality = faceDescriptorQuality;
 

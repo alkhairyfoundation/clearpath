@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, Prisma } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 
 const connectionString = process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL
@@ -17,7 +17,7 @@ const prisma = new PrismaClient({
 async function main() {
   const result = await prisma.student.updateMany({
     data: {
-      faceDescriptor: null,
+      faceDescriptor: Prisma.DbNull,
       faceImage: null,
       faceDescriptorQuality: null,
     },
